@@ -2,812 +2,1345 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>10名ゴルフコンペ スコア＆ベガス管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ゴルフコンペ管理システム (10名専用)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
   <style>
-    .active-toggle {
-      background-color: #2563eb !important;
-      color: #ffffff !important;
-      border-color: #1d4ed8 !important;
-    }
-    .active-penalty {
-      background-color: #dc2626 !important;
-      color: #ffffff !important;
-      border-color: #b91c1c !important;
-    }
+    body { -webkit-tap-highlight-color: transparent; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-900 pb-16">
+<body class="bg-slate-100 text-slate-800 font-sans pb-16">
 
-  <!-- ヘッダー -->
-  <header class="bg-emerald-800 text-white p-4 shadow-md sticky top-0 z-30 flex justify-between items-center">
-    <div>
-      <h1 class="text-xl font-bold tracking-tight">Golf Comp Manager</h1>
-      <p class="text-xs text-emerald-200">10名完全加算P ＆ ラスベガス管理</p>
+  <!-- ==================== ヘッダー ==================== -->
+  <header class="bg-emerald-700 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-4xl mx-auto px-4 py-2 flex items-center justify-between">
+      <div>
+        <div class="flex items-center space-x-2">
+          <h1 id="headerRoomName" class="font-bold text-base md:text-lg leading-tight">ゴルフコンペ</h1>
+          <span id="roleBadge" class="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-200"></span>
+        </div>
+        <div class="flex items-center space-x-2 text-xs text-emerald-100 mt-0.5">
+          <span id="connStatus" class="inline-block w-2 h-2 rounded-full bg-yellow-400"></span>
+          <span id="connText">接続中...</span>
+          <span id="roomCodeDisplay" class="font-mono bg-emerald-800 px-1.5 py-0.5 rounded text-[11px]"></span>
+        </div>
+      </div>
+      <div class="flex items-center space-x-1.5">
+        <button onclick="openRuleModal()" class="bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-400 shadow-sm">
+          📖 ルール
+        </button>
+        <!-- 幹事のみ表示される幹事ページ切り替えボタン -->
+        <button id="adminNavBtn" onclick="toggleAdminView()" class="hidden bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold text-xs px-2.5 py-1.5 rounded-lg shadow-sm">
+          ⚙️ 幹事画面
+        </button>
+      </div>
     </div>
-    <div class="flex items-center space-x-2">
-      <span id="syncBadge" class="text-xs bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-full border border-emerald-600">ローカル動作中</span>
-      <button onclick="toggleSettingsModal()" class="text-xs bg-emerald-700 hover:bg-emerald-600 px-2.5 py-1 rounded shadow">Firebase設定</button>
+
+    <!-- 参加者用・メイン2タブ (幹事設定画面では非表示) -->
+    <div id="mainTabsNav" class="max-w-4xl mx-auto flex border-t border-emerald-600 text-sm font-bold">
+      <button id="tabBtnScore" onclick="switchPlayerTab('score')" class="flex-1 py-2 text-center border-b-4 border-white bg-emerald-800 text-white">
+        📝 スコア入力
+      </button>
+      <button id="tabBtnRank" onclick="switchPlayerTab('rank')" class="flex-1 py-2 text-center border-b-4 border-transparent text-emerald-200 hover:text-white">
+        🏆 順位確認
+      </button>
     </div>
   </header>
 
-  <!-- ナビゲーションタブ -->
-  <nav class="max-w-4xl mx-auto mt-3 px-3 flex space-x-2">
-    <button onclick="switchTab('input')" id="tab-input" class="flex-1 py-2 text-center text-sm font-bold bg-white text-emerald-800 border-b-2 border-emerald-600 rounded-t shadow-sm">ホール入力・ベガス</button>
-    <button onclick="switchTab('leaderboard')" id="tab-leaderboard" class="flex-1 py-2 text-center text-sm font-bold bg-slate-200 text-slate-600 rounded-t shadow-sm">総合順位・P内訳</button>
-    <button onclick="switchTab('titles')" id="tab-titles" class="flex-1 py-2 text-center text-sm font-bold bg-slate-200 text-slate-600 rounded-t shadow-sm">タイトルP管理</button>
-  </nav>
+  <!-- トースト通知 -->
+  <div id="toast" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg shadow-xl hidden transition-all">
+    <span id="toastMsg">通知メッセージ</span>
+  </div>
 
-  <main class="max-w-4xl mx-auto p-3 space-y-4">
+  <!-- コンテナ -->
+  <main class="max-w-4xl mx-auto px-2 pt-2">
 
-    <!-- TAB 1: 入力 & ベガス画面 -->
-    <div id="view-input" class="space-y-4">
-      
-      <!-- ホール選択バー -->
-      <div class="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex items-center justify-between">
-        <button onclick="changeHole(-1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded font-bold text-sm">◀ 前H</button>
-        <div class="text-center">
-          <span class="text-lg font-black text-emerald-900" id="currentHoleLabel">Hole 1</span>
-          <span class="text-xs ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-semibold" id="holeParHdcpLabel">Par 4 / HDCP 1</span>
+    <!-- ============================================================== -->
+    <!-- 【画面A】幹事用設定・司令塔ページ (独立画面)                    -->
+    <!-- ============================================================== -->
+    <div id="adminPageView" class="space-y-3 pb-8">
+      <div class="bg-white rounded-xl shadow-sm border border-amber-300 p-4">
+        <div class="flex items-center justify-between border-b border-amber-100 pb-2 mb-3">
+          <div class="flex items-center space-x-2">
+            <span class="text-xl">⚙️</span>
+            <div>
+              <h2 class="font-extrabold text-slate-800 text-base">幹事コントロールパネル</h2>
+              <p class="text-xs text-slate-500">初期設定、LINE共有、いつでもHDCP再設定・履歴管理</p>
+            </div>
+          </div>
+          <button id="adminBackBtn" onclick="toggleAdminView()" class="hidden bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow">
+            スコア画面へ ➔
+          </button>
         </div>
-        <button onclick="changeHole(1)" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded font-bold text-sm">次H ▶</button>
-      </div>
 
-      <!-- ラスベガス ペアリング＆結果表示 -->
-      <div class="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-        <div class="flex justify-between items-center mb-2">
-          <h2 class="text-sm font-bold text-slate-800 flex items-center">
-            <span class="mr-1.5">🎲</span> ラスベガス チーム編成＆獲得P
-          </h2>
-          <span class="text-xs text-slate-500" id="vegasStatusDesc">1H目: ランダム編成</span>
-        </div>
-        
-        <div id="vegasTeamsContainer" class="grid grid-cols-1 md:grid-cols-5 gap-2 text-xs">
-          <!-- JSでレンダリング -->
-        </div>
-      </div>
-
-      <!-- プレイヤー入力リスト -->
-      <div class="bg-white p-3 rounded-lg shadow-sm border border-slate-200">
-        <h2 class="text-sm font-bold text-slate-800 mb-3 flex items-center">
-          <span class="mr-1.5">📝</span> スコア＆ゲームP入力
-        </h2>
-        <div id="playerInputsList" class="space-y-3">
-          <!-- JSで10名分生成 -->
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 2: 総合順位・リーダーボード -->
-    <div id="view-leaderboard" class="hidden space-y-4">
-      <div class="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-        <h2 class="text-base font-bold text-slate-800 mb-3 flex items-center justify-between">
-          <span>🏆 総合ポイントランキング</span>
-          <span class="text-xs font-normal text-slate-500">完全加算方式</span>
-        </h2>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                <th class="p-2 text-center">順位</th>
-                <th class="p-2">氏名</th>
-                <th class="p-2 text-center">HDCP</th>
-                <th class="p-2 text-center text-emerald-800 font-black">総合P</th>
-                <th class="p-2 text-center">スコアP</th>
-                <th class="p-2 text-center">ゲームP</th>
-                <th class="p-2 text-center">ベガスP</th>
-                <th class="p-2 text-center">タイトルP</th>
-                <th class="p-2 text-center text-slate-400">Total打数</th>
-              </tr>
-            </thead>
-            <tbody id="leaderboardTbody" class="divide-y divide-slate-100">
-              <!-- JSレンダリング -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- TAB 3: タイトルP（ニアピン・ドラコン） -->
-    <div id="view-titles" class="hidden space-y-4">
-      <div class="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-        <div class="flex justify-between items-center mb-3">
-          <div>
-            <h2 class="text-base font-bold text-slate-800">🎯 タイトルP設定・結果</h2>
-            <p class="text-xs text-slate-500">基本10P / キャリー最大20P / 上限累計20P（到達後は他者阻止）</p>
+        <!-- LINE共有 ＆ 参加者URL (開始後に表示) -->
+        <div id="shareSection" class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-black text-emerald-900">📲 参加者用・共有リンク</span>
+            <span class="text-[10px] bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-bold">一般参加用 (幹事権限なし)</span>
+          </div>
+          <p class="text-[11px] text-emerald-800">以下のリンクを参加者へ共有すると、全員のスマホでスコア入力・成績がリアルタイム連動します。</p>
+          <div class="flex items-center space-x-2">
+            <input type="text" id="shareUrlInput" readonly class="flex-1 bg-white border border-emerald-300 text-slate-700 font-mono text-xs rounded-lg p-2 font-bold select-all">
+            <button onclick="copyShareUrl()" class="bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg shrink-0">
+              📋 コピー
+            </button>
+            <button onclick="shareViaLine()" class="bg-[#06C755] hover:bg-[#05b34c] text-white text-xs font-black px-3 py-2 rounded-lg shrink-0 shadow flex items-center space-x-1">
+              <span>LINE共有</span>
+            </button>
           </div>
         </div>
 
-        <div id="titleHolesList" class="space-y-3">
-          <!-- JSレンダリング -->
+        <!-- コンペ基本情報 -->
+        <div class="space-y-3 mb-4">
+          <div>
+            <label class="block text-xs font-extrabold text-slate-700 mb-1">コンペ名称</label>
+            <input type="text" id="adminRoomNameInput" class="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold focus:ring-2 focus:ring-amber-400" placeholder="例: 第1回 10名ゴルフコンペ">
+          </div>
+        </div>
+
+        <!-- 10名個別HDCP・名前設定テーブル -->
+        <div class="mb-4">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-black text-slate-800">👥 10名個別設定（名前・適用ホール・HDCP）</label>
+            <span class="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded">いつでも再設定可能</span>
+          </div>
+          <p class="text-[11px] text-slate-500 mb-2">※プレー途中でも変更可能。保存した瞬間に過去ホールも含め全自動で玉突き再計算されます。</p>
+          <div id="adminPlayersContainer" class="space-y-2">
+            <!-- JSで10名分動的生成 -->
+          </div>
+        </div>
+
+        <!-- 幹事アクションボタン -->
+        <div class="pt-2 border-t border-slate-200 flex space-x-2">
+          <button id="startCompetitionBtn" onclick="saveAdminSettings(true)" class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm rounded-xl shadow-md active:scale-95">
+            🚀 コンペを開始して参加者URLを発行
+          </button>
+          <button id="updateSettingsBtn" onclick="saveAdminSettings(false)" class="hidden flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black text-sm rounded-xl shadow-md active:scale-95">
+            💾 設定を更新（リアルタイム即時再計算）
+          </button>
         </div>
       </div>
     </div>
 
+    <!-- ============================================================== -->
+    <!-- 【画面B】一般参加者用画面 (スコア入力 ＆ 順位確認)               -->
+    <!-- ============================================================== -->
+    <div id="playerMainView" class="hidden space-y-2">
+
+      <!-- B-1: スコア入力タブ -->
+      <div id="scoreTabPane" class="space-y-2">
+        <!-- 18ホール グリッド切り替え -->
+        <div class="bg-white p-2 rounded-xl shadow-sm border border-slate-200">
+          <div class="text-xs font-bold text-slate-500 mb-1 flex justify-between items-center">
+            <span>ホール選択</span>
+            <span id="holeInfoText" class="text-emerald-700 font-extrabold text-sm">1H (Par 4)</span>
+          </div>
+          <div class="grid grid-cols-9 gap-1 text-xs font-bold text-center">
+            <div id="holeGridOut" class="contents"></div>
+            <div id="holeGridIn" class="contents"></div>
+          </div>
+        </div>
+
+        <!-- タイトル（ニアピン・ドラコン）選択バナー -->
+        <div id="titleBanner" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2.5 shadow-sm">
+          <div class="flex items-center justify-between mb-1.5">
+            <span id="titleBadge" class="bg-amber-500 text-slate-900 font-extrabold text-xs px-2 py-0.5 rounded-full"></span>
+            <span class="text-xs text-amber-800 font-bold">基本 10P (持越上限 20P / 個人累計上限 20P)</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <label class="text-xs font-bold text-amber-900 shrink-0">獲得者:</label>
+            <select id="titleWinnerSelect" onchange="onTitleWinnerChange(this.value)" class="flex-1 bg-white border border-amber-400 text-slate-800 text-xs font-bold rounded-lg p-2">
+              <option value="none">⚠️ 未選択</option>
+              <option value="carry">該当者なし（次へ持ち越し）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 10名入力カード -->
+        <div id="playerCardsContainer" class="space-y-2"></div>
+      </div>
+
+      <!-- B-2: 順位確認タブ -->
+      <div id="rankTabPane" class="hidden space-y-3">
+        <!-- 総合リーダーボード -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="text-sm font-extrabold text-slate-700">
+              🏆 総合順位表 <span class="text-xs font-normal text-slate-400 ml-1">(完全ネット集計)</span>
+            </h2>
+            <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">10名</span>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs border-collapse min-w-[520px]">
+              <thead>
+                <tr class="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold">
+                  <th class="py-2 px-1 text-center w-8">順</th>
+                  <th class="py-2 px-2">名前</th>
+                  <th class="py-2 px-1 text-center">完了</th>
+                  <th class="py-2 px-2 text-right font-black text-emerald-700">総合P</th>
+                  <th class="py-2 px-1 text-right text-slate-500">スコアP</th>
+                  <th class="py-2 px-1 text-right text-slate-500">ゲームP</th>
+                  <th class="py-2 px-1 text-right text-slate-500">ベガスP</th>
+                  <th class="py-2 px-1 text-right text-slate-500">タイトルP</th>
+                  <th class="py-2 px-1.5 text-right font-bold text-slate-700">Net打</th>
+                  <th class="py-2 px-1.5 text-right text-slate-400">Gross</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboardBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 成績詳細 3サブタブ -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-2">
+          <div class="flex border-b border-slate-200 text-xs font-extrabold mb-2">
+            <button id="subTabVegasBtn" onclick="switchRankSubTab('vegas')" class="flex-1 py-2 text-center border-b-2 border-emerald-600 text-emerald-700">
+              🎲 ラスベガス詳細
+            </button>
+            <button id="subTabBonusBtn" onclick="switchRankSubTab('bonus')" class="flex-1 py-2 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-600">
+              ✨ ボーナス・役一覧
+            </button>
+            <button id="subTabPersonalBtn" onclick="switchRankSubTab('personal')" class="flex-1 py-2 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-600">
+              👤 個人詳細カード
+            </button>
+          </div>
+
+          <!-- サブタブ1: ラスベガス -->
+          <div id="subVegasView" class="space-y-2">
+            <div class="text-[11px] text-slate-500 px-1 flex justify-between items-center">
+              <span>※前ホール全員完了までペア完全秘匿</span>
+              <span class="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded">1位 3P / 2位 2P / 3位 1P</span>
+            </div>
+            <div id="vegasHolesList" class="space-y-2"></div>
+          </div>
+
+          <!-- サブタブ2: ボーナス・役一覧 -->
+          <div id="subBonusView" class="hidden space-y-2">
+            <div id="bonusHolesList" class="space-y-3"></div>
+          </div>
+
+          <!-- サブタブ3: 個人詳細カード -->
+          <div id="subPersonalView" class="hidden space-y-2">
+            <div class="flex items-center space-x-2 mb-2 p-1.5 bg-slate-50 rounded-lg">
+              <label class="text-xs font-bold text-slate-700">表示プレイヤー:</label>
+              <select id="personalSelect" onchange="renderPersonalCard(this.value)" class="flex-1 bg-white border border-slate-300 text-xs font-bold rounded p-1.5"></select>
+            </div>
+            <div id="personalCardContent"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
   </main>
 
-  <!-- Firebase 設定モーダル -->
-  <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-lg max-w-md w-full p-4 space-y-3">
-      <h3 class="font-bold text-slate-800 text-base">Firebase Realtime DB 設定</h3>
-      <p class="text-xs text-slate-500">別端末とリアルタイム同期する場合は設定を入力してください。空欄の場合はローカル（端末内）で動作します。</p>
-      
-      <div>
-        <label class="block text-xs font-semibold text-slate-600">Firebase Config (JSON)</label>
-        <textarea id="firebaseConfigInput" class="w-full text-xs p-2 border rounded font-mono" rows="4" placeholder='{"apiKey": "...","databaseURL": "..."}'></textarea>
+  <!-- ==================== ルール説明モーダル ==================== -->
+  <div id="ruleModal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-3">
+    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="bg-emerald-700 px-4 py-3 text-white font-extrabold flex justify-between items-center">
+        <span>📖 コンペ＆ゲーム ルール説明</span>
+        <button onclick="closeRuleModal()" class="text-white font-black text-xl hover:opacity-70">&times;</button>
       </div>
-
-      <div>
-        <label class="block text-xs font-semibold text-slate-600">大会ID (Firebase保存パス)</label>
-        <input type="text" id="firebaseRoomInput" class="w-full text-xs p-2 border rounded" placeholder="golf_comp_2026_01">
+      <div class="p-4 overflow-y-auto space-y-4 text-xs text-slate-700 leading-relaxed">
+        <div class="border-l-4 border-emerald-600 pl-2">
+          <h3 class="font-extrabold text-slate-900 text-sm">1. 個別ハンディキャップ & ネット計算</h3>
+          <p class="mt-1">
+            幹事画面でプレイヤー個別に設定された**「適用ホール」**において、グロス打数にHDCP値（+1〜-3）を加減算した**「ネット打数」**を算出します。
+            <br><span class="font-bold text-emerald-700">★ スコアP、ラスベガスのチーム数字・勝敗判定、前ホールたすき掛け順位はすべてネット打数を基準に行われます。</span>
+          </p>
+        </div>
+        <div class="border-l-4 border-emerald-600 pl-2">
+          <h3 class="font-extrabold text-slate-900 text-sm">2. スコアポイント (ネット打数 vs Par)</h3>
+          <ul class="list-disc list-inside mt-1 font-semibold space-y-0.5">
+            <li>イーグル以上: <span class="text-emerald-700 font-bold">+3P</span></li>
+            <li>バーディ: <span class="text-emerald-700 font-bold">+2P</span></li>
+            <li>パー: <span class="text-emerald-700 font-bold">+1P</span></li>
+            <li>ボギー以上: <span class="text-slate-500">0P</span></li>
+          </ul>
+        </div>
+        <div class="border-l-4 border-emerald-600 pl-2">
+          <h3 class="font-extrabold text-slate-900 text-sm">3. ゲームボーナス ＆ ペナルティ</h3>
+          <ul class="list-disc list-inside mt-1 space-y-0.5">
+            <li>チップイン: <span class="text-emerald-700 font-bold">+2P</span></li>
+            <li>サオイチ: <span class="text-emerald-700 font-bold">+1P</span> (ワンパット自動付与で実質 <span class="font-bold text-emerald-800">+2P</span>)</li>
+            <li>砂イチ: <span class="text-emerald-700 font-bold">+1P</span> (バンカー-1P、ワンパット+1P連動で実質 <span class="font-bold text-emerald-800">+1P</span>)</li>
+            <li>ワンパット: <span class="text-emerald-700 font-bold">+1P</span></li>
+            <li>ペナルティ (OB / 池 / バンカー / 3パット以上): 各 <span class="text-red-600 font-bold">-1P</span></li>
+          </ul>
+        </div>
+        <div class="border-l-4 border-emerald-600 pl-2">
+          <h3 class="font-extrabold text-slate-900 text-sm">4. ラスベガス (たすき掛けペア戦)</h3>
+          <p class="mt-1">
+            ・1Hは初期ペア。2H以降は前ホールのネット打数順位によるたすき掛け（1&10位, 2&9位, 3&8位, 4&7位, 5&6位）。<br>
+            ・<span class="text-amber-800 font-bold">前ホールの10名全員が完了するまでペア相手・チームは完全非公開</span>。<br>
+            ・ペア2名のネット打数を小さい順に並べた2桁数字（例: 4打と5打なら「45組」）で勝負。<br>
+            ・配当: 1位 3P / 2位 2P / 3位 1P / 4・5位 0P（同点は均等山分け）。
+          </p>
+        </div>
+        <div class="border-l-4 border-emerald-600 pl-2">
+          <h3 class="font-extrabold text-slate-900 text-sm">5. タイトルP (ニアピン・ドラコン)</h3>
+          <p class="mt-1">
+            ・基本 10P。該当者なしは次対象ホールへ持ち越し（最大 20P）。<br>
+            ・<span class="text-red-700 font-bold">大会累計上限: 1人最大20Pまで</span>。<br>
+            ・累計20P到達者が獲得した場合、付与は0Pとなり他者の獲得を潰す**「ブロッカー」**として機能します（持ち越しも消滅）。
+          </p>
+        </div>
       </div>
-
-      <div class="flex justify-end space-x-2 pt-2 border-t">
-        <button onclick="toggleSettingsModal()" class="px-3 py-1.5 bg-slate-100 text-xs rounded">キャンセル</button>
-        <button onclick="saveFirebaseSettings()" class="px-3 py-1.5 bg-emerald-700 text-white text-xs font-bold rounded">接続して保存</button>
+      <div class="bg-slate-100 px-4 py-2 flex justify-end">
+        <button onclick="closeRuleModal()" class="px-5 py-1.5 bg-emerald-700 text-white font-bold rounded-lg">閉じる</button>
       </div>
     </div>
   </div>
 
+  <!-- ==================== JavaScript ロジック ==================== -->
   <script>
-    // --- 初期コースデータ（18ホール HDCP難易度定義） ---
-    const COURSE_DATA = [
-      { hole: 1, par: 4, hdcp: 9 },
-      { hole: 2, par: 5, hdcp: 3 },
-      { hole: 3, par: 4, hdcp: 13 },
-      { hole: 4, par: 3, hdcp: 17, isTitle: true, titleType: 'ニアピン' },
-      { hole: 5, par: 4, hdcp: 5 },
-      { hole: 6, par: 4, hdcp: 11 },
-      { hole: 7, par: 5, hdcp: 1, isTitle: true, titleType: 'ドラコン' },
-      { hole: 8, par: 3, hdcp: 15 },
-      { hole: 9, par: 4, hdcp: 7 },
-      { hole: 10, par: 4, hdcp: 10 },
-      { hole: 11, par: 4, hdcp: 6 },
-      { hole: 12, par: 3, hdcp: 18, isTitle: true, titleType: 'ニアピン' },
-      { hole: 13, par: 5, hdcp: 2 },
-      { hole: 14, par: 4, hdcp: 14 },
-      { hole: 15, par: 4, hdcp: 8, isTitle: true, titleType: 'ドラコン' },
-      { hole: 16, par: 3, hdcp: 16 },
-      { hole: 17, par: 4, hdcp: 12 },
-      { hole: 18, par: 5, hdcp: 4 }
-    ];
-
-    // --- プレイヤー基本定義（10名） ---
-    const DEFAULT_PLAYERS = [
-      { id: 1, name: 'プレイヤー1', hdcp: 8 },
-      { id: 2, name: 'プレイヤー2', hdcp: 12 },
-      { id: 3, name: 'プレイヤー3', hdcp: 14 },
-      { id: 4, name: 'プレイヤー4', hdcp: 16 },
-      { id: 5, name: 'プレイヤー5', hdcp: 18 },
-      { id: 6, name: 'プレイヤー6', hdcp: 20 },
-      { id: 7, name: 'プレイヤー7', hdcp: 22 },
-      { id: 8, name: 'プレイヤー8', hdcp: 24 },
-      { id: 9, name: 'プレイヤー9', hdcp: 27 },
-      { id: 10, name: 'プレイヤー10', hdcp: 30 }
-    ];
-
-    // --- グローバル状態 ---
-    let currentHole = 1;
-    let appState = {
-      players: DEFAULT_PLAYERS,
-      // 各ホールのスコアデータ: scores[hole][playerId] = { gross, chipIn, saoIchi, sunaIchi, onePutt, ob, pond, bunker, threePutt }
-      scores: {},
-      // 1H目用の固定ランダムペア
-      hole1SeedPairings: null,
-      // タイトル勝者登録: titleWinners[hole] = playerId (0は該当者なし)
-      titleWinners: {}
+    // --- Firebase 初期化 ---
+    const firebaseConfig = {
+      databaseURL: "https://okadagolf-app-default-rtdb.firebaseio.com/"
     };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
 
-    let firebaseDb = null;
-    let compPath = 'golf_comp_default';
+    // 18ホール定義
+    const HOLE_DEFS = [
+      { num: 1, par: 4, type: null },
+      { num: 2, par: 5, type: 'ドラコン' },
+      { num: 3, par: 3, type: 'ニアピン' },
+      { num: 4, par: 4, type: null },
+      { num: 5, par: 4, type: null },
+      { num: 6, par: 4, type: null },
+      { num: 7, par: 3, type: 'ニアピン' },
+      { num: 8, par: 5, type: 'ドラコン' },
+      { num: 9, par: 4, type: null },
+      { num: 10, par: 4, type: null },
+      { num: 11, par: 4, type: null },
+      { num: 12, par: 3, type: 'ニアピン' },
+      { num: 13, par: 5, type: 'ドラコン' },
+      { num: 14, par: 4, type: null },
+      { num: 15, par: 4, type: null },
+      { num: 16, par: 4, type: null },
+      { num: 17, par: 3, type: 'ニアピン' },
+      { num: 18, par: 5, type: 'ドラコン' }
+    ];
 
-    // --- 初期化 ---
+    // --- アプリ状態 ---
+    let currentRoomId = null;
+    let isAdminRole = false;       // URLに admin=1 があるか、新規作成したか
+    let roomData = null;
+    let currentHole = 1;
+    let activePlayerTab = 'score'; // 'score' | 'rank'
+    let activeRankSubTab = 'vegas';// 'vegas' | 'bonus' | 'personal'
+    let showingAdminPage = true;   // 幹事画面を表示中か
+
     window.addEventListener('DOMContentLoaded', () => {
-      initEmptyScores();
-      loadFromLocalStorage();
-      renderAll();
+      const urlParams = new URLSearchParams(window.location.search);
+      const rId = urlParams.get('room');
+      const adminParam = urlParams.get('admin');
+
+      if (rId) {
+        isAdminRole = (adminParam === '1');
+        joinRoom(rId);
+      } else {
+        // ルームパラメータなしで開いた場合は新規作成（幹事として開始）
+        isAdminRole = true;
+        createNewTournament();
+      }
     });
 
-    function initEmptyScores() {
-      for (let h = 1; h <= 18; h++) {
-        if (!appState.scores[h]) appState.scores[h] = {};
-        appState.players.forEach(p => {
-          if (!appState.scores[h][p.id]) {
-            appState.scores[h][p.id] = {
-              gross: COURSE_DATA[h - 1].par,
-              chipIn: false,
-              saoIchi: false,
-              sunaIchi: false,
-              onePutt: false,
-              ob: 0,
-              pond: 0,
-              bunker: 0,
-              threePutt: 0
-            };
-          }
-        });
-      }
-      // 1Hペア初期化
-      if (!appState.hole1SeedPairings) {
-        generateHole1Seed();
-      }
-    }
-
-    function generateHole1Seed() {
-      const pIds = appState.players.map(p => p.id).sort(() => Math.random() - 0.5);
-      appState.hole1SeedPairings = [
-        [pIds[0], pIds[1]],
-        [pIds[2], pIds[3]],
-        [pIds[4], pIds[5]],
-        [pIds[6], pIds[7]],
-        [pIds[8], pIds[9]]
-      ];
-    }
-
-    // --- ハンディキャップ計算 ---
-    function getStrokeAllowance(playerHdcp, holeHdcp) {
-      let strokes = Math.floor(playerHdcp / 18);
-      const remainder = playerHdcp % 18;
-      if (holeHdcp <= remainder) strokes += 1;
-      return strokes;
-    }
-
-    function getNetScore(hole, playerId) {
-      const gross = appState.scores[hole][playerId]?.gross || COURSE_DATA[hole - 1].par;
-      const pHdcp = appState.players.find(p => p.id === playerId)?.hdcp || 0;
-      const allowance = getStrokeAllowance(pHdcp, COURSE_DATA[hole - 1].hdcp);
-      return gross - allowance;
-    }
-
-    // --- 厳密順位付けロジック（前ホール実績基準） ---
-    function rankPlayersForHole(prevHole) {
-      const list = appState.players.map(p => {
-        const sc = appState.scores[prevHole][p.id];
-        const net = getNetScore(prevHole, p.id);
-        const gross = sc.gross;
-        
-        // 当該ホールボーナス数
-        let bonuses = 0;
-        if (sc.chipIn) bonuses++;
-        if (sc.saoIchi) bonuses++;
-        if (sc.sunaIchi) bonuses++;
-        if (sc.onePutt) bonuses++;
-
-        // 当該ホールペナルティ数
-        const penalties = (sc.ob || 0) + (sc.pond || 0) + (sc.bunker || 0) + (sc.threePutt || 0);
-
-        // 累計計算
-        let cumNet = 0;
-        let cumGross = 0;
-        let cumBonuses = 0;
-        let cumPenalties = 0;
-        for (let h = 1; h <= prevHole; h++) {
-          const hSc = appState.scores[h][p.id];
-          cumNet += getNetScore(h, p.id);
-          cumGross += hSc.gross;
-          if (hSc.chipIn) cumBonuses++;
-          if (hSc.saoIchi) cumBonuses++;
-          if (hSc.sunaIchi) cumBonuses++;
-          if (hSc.onePutt) cumBonuses++;
-          cumPenalties += (hSc.ob || 0) + (hSc.pond || 0) + (hSc.bunker || 0) + (hSc.threePutt || 0);
-        }
-
-        return {
-          id: p.id,
-          net,
-          gross,
-          bonuses,
-          penalties,
-          cumNet,
-          cumGross,
-          cumBonuses,
-          cumPenalties
+    // --- 新規コンペ作成 (幹事初期起動) ---
+    function createNewTournament() {
+      const code = 'GOLF-' + Math.random().toString(36).substring(2, 7).toUpperCase();
+      const players = {};
+      for (let i = 1; i <= 10; i++) {
+        players['p' + i] = {
+          id: 'p' + i,
+          name: 'プレイヤー ' + i,
+          hdcpScope: 'all', // 'none' | 'all' | 'par45' | 'par4'
+          hdcpVal: 0        // +1 ~ -3
         };
-      });
-
-      // 厳密ソート順序
-      list.sort((a, b) => {
-        if (a.net !== b.net) return a.net - b.net;
-        if (a.gross !== b.gross) return a.gross - b.gross;
-        if (a.bonuses !== b.bonuses) return b.bonuses - a.bonuses; // 多い順
-        if (a.penalties !== b.penalties) return a.penalties - b.penalties; // 少ない順
-        if (a.cumNet !== b.cumNet) return a.cumNet - b.cumNet;
-        if (a.cumGross !== b.cumGross) return a.cumGross - b.cumGross;
-        if (a.cumBonuses !== b.cumBonuses) return b.cumBonuses - a.cumBonuses; // 多い順
-        if (a.cumPenalties !== b.cumPenalties) return a.cumPenalties - b.cumPenalties; // 少ない順
-        return a.id - b.id; // シード順固定
-      });
-
-      return list.map(item => item.id);
-    }
-
-    // --- ペアリング取得（たすき掛けクロス方式） ---
-    function getPairingsForHole(hole) {
-      if (hole === 1) {
-        return appState.hole1SeedPairings;
-      }
-      const rankedIds = rankPlayersForHole(hole - 1);
-      return [
-        [rankedIds[0], rankedIds[9]], // 1位 & 10位
-        [rankedIds[1], rankedIds[8]], // 2位 & 9位
-        [rankedIds[2], rankedIds[7]], // 3位 & 8位
-        [rankedIds[3], rankedIds[6]], // 4位 & 7位
-        [rankedIds[4], rankedIds[5]]  // 5位 & 6位
-      ];
-    }
-
-    // --- ラスベガス得点計算（山分け方式） ---
-    function calculateVegasForHole(hole) {
-      const pairs = getPairingsForHole(hole);
-      const teamResults = pairs.map((pair, index) => {
-        const net1 = getNetScore(hole, pair[0]);
-        const net2 = getNetScore(hole, pair[1]);
-        const smaller = Math.min(net1, net2);
-        const larger = Math.max(net1, net2);
-        const scoreNum = smaller * 10 + larger;
-        return {
-          teamIndex: index,
-          pair,
-          scoreNum,
-          points: 0
-        };
-      });
-
-      // チーム数字の昇順ソート
-      teamResults.sort((a, b) => a.scoreNum - b.scoreNum);
-
-      const basePoints = [3, 2, 1, 0, 0];
-      let i = 0;
-      while (i < teamResults.length) {
-        let j = i;
-        while (j < teamResults.length && teamResults[j].scoreNum === teamResults[i].scoreNum) {
-          j++;
-        }
-        // i から j-1 までが同点
-        const count = j - i;
-        let sumP = 0;
-        for (let k = i; k < j; k++) {
-          sumP += basePoints[k];
-        }
-        const splitP = Math.round((sumP / count) * 10) / 10;
-        for (let k = i; k < j; k++) {
-          teamResults[k].points = splitP;
-        }
-        i = j;
       }
 
-      // プレイヤーごとの獲得Pマップ
-      const playerPoints = {};
-      teamResults.forEach(t => {
-        playerPoints[t.pair[0]] = t.points;
-        playerPoints[t.pair[1]] = t.points;
-      });
-
-      return { teamResults, playerPoints };
-    }
-
-    // --- タイトルP 計算（持ち越し＆上限20P・阻止判定） ---
-    function calculateTitlePointsSummary() {
-      let currentCarry = 0;
-      const playerAccumulated = {};
-      appState.players.forEach(p => playerAccumulated[p.id] = 0);
-      const history = [];
-
-      COURSE_DATA.forEach(h => {
-        if (!h.isTitle) return;
-        const prizePool = Math.min(20, 10 + currentCarry);
-        const winnerId = appState.titleWinners[h.hole] || 0;
-
-        let awarded = 0;
-        let blocked = false;
-
-        if (winnerId > 0) {
-          if (playerAccumulated[winnerId] >= 20) {
-            awarded = 0;
-            blocked = true;
-          } else {
-            awarded = prizePool;
-            playerAccumulated[winnerId] += awarded;
-          }
-          currentCarry = 0; // 勝者ありでプールリセット
-        } else {
-          // 該当者なしで持ち越し
-          currentCarry = prizePool;
+      const initialData = {
+        name: '第1回 10名ゴルフコンペ',
+        code: code,
+        status: 'setting', // 'setting' (設定中) | 'playing' (開始後)
+        players: players,
+        scores: {},
+        titles: {},
+        vegasSetup: {
+          h1: [['p1', 'p10'], ['p2', 'p9'], ['p3', 'p8'], ['p4', 'p7'], ['p5', 'p6']]
         }
+      };
 
-        history.push({
-          hole: h.hole,
-          titleType: h.titleType,
-          winnerId,
-          pool: prizePool,
-          awarded,
-          blocked
-        });
+      db.ref('rooms/' + code).set(initialData).then(() => {
+        window.history.replaceState(null, '', `?room=${code}&admin=1`);
+        joinRoom(code);
       });
-
-      return { playerAccumulated, history };
     }
 
-    // --- UI レンダリング ---
-    function renderAll() {
-      renderHoleHeader();
-      renderVegasView();
-      renderPlayerInputs();
-      renderLeaderboard();
-      renderTitlesView();
-    }
-
-    function renderHoleHeader() {
-      const info = COURSE_DATA[currentHole - 1];
-      document.getElementById('currentHoleLabel').textContent = `Hole ${info.hole}`;
-      document.getElementById('holeParHdcpLabel').textContent = `Par ${info.par} / HDCP ${info.hdcp}`;
-    }
-
-    function renderVegasView() {
-      const container = document.getElementById('vegasTeamsContainer');
-      container.innerHTML = '';
+    // --- ルーム接続 & リアルタイム同期リスナー ---
+    function joinRoom(code) {
+      currentRoomId = code;
+      document.getElementById('roomCodeDisplay').innerText = code;
       
-      const { teamResults } = calculateVegasForHole(currentHole);
-      document.getElementById('vegasStatusDesc').textContent = 
-        currentHole === 1 ? '1H: ランダム編成' : `前H実績による たすき掛けクロス編成`;
+      const roleBadge = document.getElementById('roleBadge');
+      const adminNavBtn = document.getElementById('adminNavBtn');
+      if (isAdminRole) {
+        roleBadge.innerText = '幹事';
+        roleBadge.className = 'text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-400 text-slate-900';
+        adminNavBtn.classList.remove('hidden');
+      } else {
+        roleBadge.innerText = '参加者';
+        roleBadge.className = 'text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-900 text-emerald-200';
+        adminNavBtn.classList.add('hidden');
+      }
 
-      teamResults.forEach((t, idx) => {
-        const p1 = appState.players.find(p => p.id === t.pair[0]);
-        const p2 = appState.players.find(p => p.id === t.pair[1]);
-        const net1 = getNetScore(currentHole, p1.id);
-        const net2 = getNetScore(currentHole, p2.id);
+      // Firebaseリアルタイム購読
+      const roomRef = db.ref('rooms/' + code);
+      roomRef.on('value', (snapshot) => {
+        const val = snapshot.val();
+        if (!val) {
+          showToast('コンペが見つかりませんでした');
+          return;
+        }
+        roomData = val;
+        updateConnectionStatus(true);
+        document.getElementById('headerRoomName').innerText = roomData.name || 'ゴルフコンペ';
 
-        const card = document.createElement('div');
-        card.className = `p-2 rounded border ${t.points > 0 ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`;
-        card.innerHTML = `
-          <div class="flex justify-between font-bold text-slate-700">
-            <span>チーム ${String.fromCharCode(65 + t.teamIndex)}</span>
-            <span class="text-emerald-700">${t.points} P</span>
-          </div>
-          <div class="mt-1 text-slate-600 space-y-0.5">
-            <div>${p1.name} (N:${net1})</div>
-            <div>${p2.name} (N:${net2})</div>
-          </div>
-          <div class="mt-1 text-right text-xs font-mono font-bold text-slate-500">
-            ベガス数: ${t.scoreNum}
-          </div>
-        `;
-        container.appendChild(card);
+        // 参加者共有用URLの生成
+        const shareUrl = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+        document.getElementById('shareUrlInput').value = shareUrl;
+
+        // 初回ルーティング判定
+        if (!isAdminRole) {
+          // 一般参加者は幹事画面へ入れず、常にプレイヤー画面へ
+          showingAdminPage = false;
+        } else {
+          // 幹事の場合：未開始(setting)なら幹事画面、開始済(playing)なら最初はプレイヤー画面
+          if (roomData.status === 'playing' && showingAdminPage === null) {
+            showingAdminPage = false;
+          }
+        }
+
+        renderAppLayout();
+      }, (error) => {
+        updateConnectionStatus(false);
       });
     }
 
-    function renderPlayerInputs() {
-      const container = document.getElementById('playerInputsList');
+    function updateConnectionStatus(connected) {
+      const dot = document.getElementById('connStatus');
+      const text = document.getElementById('connText');
+      if (connected) {
+        dot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-300';
+        text.innerText = 'リアルタイム同期中';
+      } else {
+        dot.className = 'inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse';
+        text.innerText = '未接続';
+      }
+    }
+
+    // --- 画面表示制御（幹事画面 vs プレイヤー画面） ---
+    function renderAppLayout() {
+      const adminView = document.getElementById('adminPageView');
+      const playerView = document.getElementById('playerMainView');
+      const mainTabsNav = document.getElementById('mainTabsNav');
+      const adminNavBtn = document.getElementById('adminNavBtn');
+      const adminBackBtn = document.getElementById('adminBackBtn');
+
+      if (showingAdminPage && isAdminRole) {
+        // 幹事ページ表示
+        adminView.classList.remove('hidden');
+        playerView.classList.add('hidden');
+        mainTabsNav.classList.add('hidden');
+        adminNavBtn.innerText = '📝 スコアへ戻る';
+        renderAdminPlayersList();
+
+        if (roomData.status === 'playing') {
+          document.getElementById('shareSection').classList.remove('hidden');
+          document.getElementById('adminBackBtn').classList.remove('hidden');
+          document.getElementById('startCompetitionBtn').classList.add('hidden');
+          document.getElementById('updateSettingsBtn').classList.remove('hidden');
+        } else {
+          document.getElementById('shareSection').classList.add('hidden');
+          document.getElementById('adminBackBtn').classList.add('hidden');
+          document.getElementById('startCompetitionBtn').classList.remove('hidden');
+          document.getElementById('updateSettingsBtn').classList.add('hidden');
+        }
+      } else {
+        // 参加者＆プレー画面表示
+        adminView.classList.add('hidden');
+        playerView.classList.remove('hidden');
+        mainTabsNav.classList.remove('hidden');
+        adminNavBtn.innerText = '⚙️ 幹事画面';
+
+        renderHoleGrids();
+        renderScoreCards();
+        if (activePlayerTab === 'rank') {
+          renderLeaderboard();
+        }
+      }
+    }
+
+    function toggleAdminView() {
+      if (!isAdminRole) return;
+      showingAdminPage = !showingAdminPage;
+      renderAppLayout();
+    }
+
+    // --- 幹事設定の描画 ＆ 保存 ---
+    function renderAdminPlayersList() {
+      if (!roomData || !roomData.players) return;
+      document.getElementById('adminRoomNameInput').value = roomData.name || '';
+      const container = document.getElementById('adminPlayersContainer');
       container.innerHTML = '';
 
-      appState.players.forEach(p => {
-        const sc = appState.scores[currentHole][p.id];
-        const net = getNetScore(currentHole, p.id);
-        const cInfo = COURSE_DATA[currentHole - 1];
-        
-        let scoreP = 0;
-        if (net <= cInfo.par - 2) scoreP = 3;
-        else if (net === cInfo.par - 1) scoreP = 2;
-        else if (net === cInfo.par) scoreP = 1;
-
+      Object.keys(roomData.players).forEach(pid => {
+        const p = roomData.players[pid];
         const row = document.createElement('div');
-        row.className = 'p-2.5 bg-slate-50 rounded border border-slate-200 text-xs space-y-2';
+        row.className = 'p-2.5 bg-slate-50 rounded-xl border border-slate-200 shadow-sm space-y-2';
         row.innerHTML = `
-          <div class="flex flex-wrap justify-between items-center gap-2">
-            <div>
-              <span class="font-bold text-sm text-slate-800">${p.name}</span>
-              <span class="text-slate-500 ml-1">(HDCP: ${p.hdcp})</span>
-              <span class="ml-2 font-bold ${scoreP > 0 ? 'text-emerald-700' : 'text-slate-400'}">スコアP: +${scoreP}</span>
-            </div>
-            <div class="flex items-center space-x-2">
-              <span class="text-slate-600">グロス:</span>
-              <button onclick="updateScore(${p.id}, 'gross', ${sc.gross - 1})" class="w-6 h-6 bg-white border rounded font-bold hover:bg-slate-100">-</button>
-              <span class="w-6 text-center font-bold text-sm text-slate-900">${sc.gross}</span>
-              <button onclick="updateScore(${p.id}, 'gross', ${sc.gross + 1})" class="w-6 h-6 bg-white border rounded font-bold hover:bg-slate-100">+</button>
-              <span class="ml-2 px-1.5 py-0.5 bg-slate-200 rounded text-slate-700 font-semibold">Net ${net}</span>
-            </div>
+          <div class="flex items-center space-x-2">
+            <span class="font-extrabold text-slate-500 w-8 text-xs">${pid.toUpperCase()}</span>
+            <input type="text" id="adm_name_${pid}" value="${p.name}" class="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:ring-2 focus:ring-amber-400">
           </div>
-
-          <!-- 小技ボーナス & ペナルティボタン群 -->
-          <div class="flex flex-wrap gap-1.5 pt-1 border-t border-slate-200">
-            <!-- チップイン -->
-            <button onclick="toggleBonus(${p.id}, 'chipIn')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.chipIn ? 'active-toggle' : 'bg-white border-slate-300 text-slate-700'}">
-              チップイン (+2)
-            </button>
-            
-            <!-- サオイチ (ワンパット自動点灯) -->
-            <button onclick="toggleSaoIchi(${p.id})" class="px-2 py-1 rounded border text-xs font-semibold ${sc.saoIchi ? 'active-toggle' : 'bg-white border-slate-300 text-slate-700'}">
-              サオイチ (+1)
-            </button>
-
-            <!-- 砂イチ (バンカー・ワンパット連動) -->
-            <button onclick="toggleSunaIchi(${p.id})" class="px-2 py-1 rounded border text-xs font-semibold ${sc.sunaIchi ? 'active-toggle' : 'bg-white border-slate-300 text-slate-700'}">
-              砂イチ (+1)
-            </button>
-
-            <!-- ワンパット -->
-            <button onclick="toggleBonus(${p.id}, 'onePutt')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.onePutt ? 'active-toggle' : 'bg-white border-slate-300 text-slate-700'}">
-              1パット (+1)
-            </button>
-
-            <span class="border-r border-slate-300 mx-1"></span>
-
-            <!-- ペナルティ -->
-            <button onclick="stepPenalty(${p.id}, 'ob')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.ob > 0 ? 'active-penalty' : 'bg-white border-slate-300 text-slate-700'}">
-              OB (${sc.ob})
-            </button>
-            <button onclick="stepPenalty(${p.id}, 'pond')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.pond > 0 ? 'active-penalty' : 'bg-white border-slate-300 text-slate-700'}">
-              池 (${sc.pond})
-            </button>
-            <button onclick="stepPenalty(${p.id}, 'bunker')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.bunker > 0 ? 'active-penalty' : 'bg-white border-slate-300 text-slate-700'}">
-              砂 (${sc.bunker})
-            </button>
-            <button onclick="stepPenalty(${p.id}, 'threePutt')" class="px-2 py-1 rounded border text-xs font-semibold ${sc.threePutt > 0 ? 'active-penalty' : 'bg-white border-slate-300 text-slate-700'}">
-              3パット+ (${sc.threePutt})
-            </button>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <label class="text-[10px] text-slate-500 font-bold block mb-0.5">適用ホール</label>
+              <select id="adm_scope_${pid}" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
+                <option value="none" ${p.hdcpScope === 'none' ? 'selected' : ''}>なし (適用外)</option>
+                <option value="all" ${(!p.hdcpScope || p.hdcpScope === 'all') ? 'selected' : ''}>全ホール</option>
+                <option value="par45" ${p.hdcpScope === 'par45' ? 'selected' : ''}>Par4 / Par5 のみ</option>
+                <option value="par4" ${p.hdcpScope === 'par4' ? 'selected' : ''}>Par4 のみ</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-[10px] text-slate-500 font-bold block mb-0.5">個別HDCP</label>
+              <select id="adm_val_${pid}" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-bold">
+                <option value="1" ${parseInt(p.hdcpVal) === 1 ? 'selected' : ''}>+1 (打数加算)</option>
+                <option value="0" ${parseInt(p.hdcpVal) === 0 ? 'selected' : ''}>0</option>
+                <option value="-1" ${parseInt(p.hdcpVal) === -1 ? 'selected' : ''}>-1 (1打マイナス)</option>
+                <option value="-2" ${parseInt(p.hdcpVal) === -2 ? 'selected' : ''}>-2 (2打マイナス)</option>
+                <option value="-3" ${parseInt(p.hdcpVal) === -3 ? 'selected' : ''}>-3 (3打マイナス)</option>
+              </select>
+            </div>
           </div>
         `;
         container.appendChild(row);
       });
     }
 
-    function renderLeaderboard() {
-      const tbody = document.getElementById('leaderboardTbody');
-      tbody.innerHTML = '';
+    function saveAdminSettings(isFirstStart) {
+      if (!isAdminRole) return;
+      const updates = {};
+      const newRoomName = document.getElementById('adminRoomNameInput').value.trim();
+      updates[`rooms/${currentRoomId}/name`] = newRoomName || 'ゴルフコンペ';
+      if (isFirstStart) {
+        updates[`rooms/${currentRoomId}/status`] = 'playing';
+      }
 
-      const titleSummary = calculateTitlePointsSummary();
+      Object.keys(roomData.players).forEach(pid => {
+        const nameVal = document.getElementById(`adm_name_${pid}`).value.trim();
+        const scopeVal = document.getElementById(`adm_scope_${pid}`).value;
+        const valNum = parseInt(document.getElementById(`adm_val_${pid}`).value, 10);
 
-      // 集計
-      const ranking = appState.players.map(p => {
-        let totalScoreP = 0;
-        let totalGameP = 0;
-        let totalVegasP = 0;
-        let totalGross = 0;
-
-        for (let h = 1; h <= 18; h++) {
-          const sc = appState.scores[h][p.id];
-          totalGross += sc.gross;
-
-          // スコアP
-          const net = getNetScore(h, p.id);
-          const cInfo = COURSE_DATA[h - 1];
-          if (net <= cInfo.par - 2) totalScoreP += 3;
-          else if (net === cInfo.par - 1) totalScoreP += 2;
-          else if (net === cInfo.par) totalScoreP += 1;
-
-          // ゲームP
-          if (sc.chipIn) totalGameP += 2;
-          if (sc.saoIchi) totalGameP += 1;
-          if (sc.sunaIchi) totalGameP += 1;
-          if (sc.onePutt) totalGameP += 1;
-          totalGameP -= ((sc.ob || 0) + (sc.pond || 0) + (sc.bunker || 0) + (sc.threePutt || 0));
-
-          // ラスベガスP
-          const vegasRes = calculateVegasForHole(h);
-          totalVegasP += (vegasRes.playerPoints[p.id] || 0);
-        }
-
-        const totalTitleP = titleSummary.playerAccumulated[p.id] || 0;
-        const totalP = Math.round((totalScoreP + totalGameP + totalVegasP + totalTitleP) * 10) / 10;
-
-        return {
-          id: p.id,
-          name: p.name,
-          hdcp: p.hdcp,
-          totalP,
-          scoreP: totalScoreP,
-          gameP: totalGameP,
-          vegasP: Math.round(totalVegasP * 10) / 10,
-          titleP: totalTitleP,
-          totalGross
-        };
+        updates[`rooms/${currentRoomId}/players/${pid}/name`] = nameVal || pid;
+        updates[`rooms/${currentRoomId}/players/${pid}/hdcpScope`] = scopeVal;
+        updates[`rooms/${currentRoomId}/players/${pid}/hdcpVal`] = valNum;
       });
 
-      // 総合P降順ソート
-      ranking.sort((a, b) => b.totalP - a.totalP || a.totalGross - b.totalGross);
-
-      ranking.forEach((r, idx) => {
-        const tr = document.createElement('tr');
-        tr.className = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50';
-        tr.innerHTML = `
-          <td class="p-2 text-center font-bold ${idx === 0 ? 'text-amber-600' : 'text-slate-600'}">${idx + 1}</td>
-          <td class="p-2 font-bold text-slate-800">${r.name}</td>
-          <td class="p-2 text-center text-slate-500">${r.hdcp}</td>
-          <td class="p-2 text-center text-emerald-700 font-black text-sm">${r.totalP}</td>
-          <td class="p-2 text-center">${r.scoreP}</td>
-          <td class="p-2 text-center">${r.gameP}</td>
-          <td class="p-2 text-center">${r.vegasP}</td>
-          <td class="p-2 text-center">${r.titleP}</td>
-          <td class="p-2 text-center text-slate-400 font-mono">${r.totalGross}</td>
-        `;
-        tbody.appendChild(tr);
+      db.ref().update(updates).then(() => {
+        showToast(isFirstStart ? 'コンペを開始しました！共有URLが発行されました' : '設定を更新しました（全自動再計算完了）');
+        if (isFirstStart) {
+          // 開始時は共有セクションを表示
+          document.getElementById('shareSection').classList.remove('hidden');
+          document.getElementById('adminBackBtn').classList.remove('hidden');
+          document.getElementById('startCompetitionBtn').classList.add('hidden');
+          document.getElementById('updateSettingsBtn').classList.remove('hidden');
+        }
       });
     }
 
-    function renderTitlesView() {
-      const container = document.getElementById('titleHolesList');
-      container.innerHTML = '';
-      const summary = calculateTitlePointsSummary();
+    // LINE共有機能
+    function shareViaLine() {
+      const shareUrl = document.getElementById('shareUrlInput').value;
+      const roomName = (roomData && roomData.name) || 'ゴルフコンペ';
+      const text = encodeURIComponent(`🏌️【${roomName}】のスコア入力＆順位確認ページです！\n以下のリンクからリアルタイム参加してください：\n${shareUrl}`);
+      window.open(`https://line.me/R/msg/text/?${text}`, '_blank');
+    }
 
-      summary.history.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'p-3 bg-slate-50 rounded border border-slate-200 flex flex-wrap justify-between items-center gap-2';
+    function copyShareUrl() {
+      const shareUrl = document.getElementById('shareUrlInput').value;
+      navigator.clipboard.writeText(shareUrl);
+      showToast('共有URLをコピーしました！LINE等に貼り付けてください');
+    }
 
-        let winnerOptions = `<option value="0">なし（次回キャリー持ち越し）</option>`;
-        appState.players.forEach(p => {
-          winnerOptions += `<option value="${p.id}" ${item.winnerId === p.id ? 'selected' : ''}>${p.name}</option>`;
+    // --- 一般参加者・メインタブ切り替え ---
+    function switchPlayerTab(tab) {
+      activePlayerTab = tab;
+      const sBtn = document.getElementById('tabBtnScore');
+      const rBtn = document.getElementById('tabBtnRank');
+      const sPane = document.getElementById('scoreTabPane');
+      const rPane = document.getElementById('rankTabPane');
+
+      if (tab === 'score') {
+        sBtn.className = 'flex-1 py-2 text-center border-b-4 border-white bg-emerald-800 text-white';
+        rBtn.className = 'flex-1 py-2 text-center border-b-4 border-transparent text-emerald-200 hover:text-white';
+        sPane.classList.remove('hidden');
+        rPane.classList.add('hidden');
+        renderScoreCards();
+      } else {
+        rBtn.className = 'flex-1 py-2 text-center border-b-4 border-white bg-emerald-800 text-white';
+        sBtn.className = 'flex-1 py-2 text-center border-b-4 border-transparent text-emerald-200 hover:text-white';
+        rPane.classList.remove('hidden');
+        sPane.classList.add('hidden');
+        renderLeaderboard();
+      }
+    }
+
+    function switchRankSubTab(sub) {
+      activeRankSubTab = sub;
+      const vBtn = document.getElementById('subTabVegasBtn');
+      const bBtn = document.getElementById('subTabBonusBtn');
+      const pBtn = document.getElementById('subTabPersonalBtn');
+      const vView = document.getElementById('subVegasView');
+      const bView = document.getElementById('subBonusView');
+      const pView = document.getElementById('subPersonalView');
+
+      [vBtn, bBtn, pBtn].forEach(b => b.className = 'flex-1 py-2 text-center border-b-2 border-transparent text-slate-400 hover:text-slate-600 font-bold');
+      [vView, bView, pView].forEach(v => v.classList.add('hidden'));
+
+      if (sub === 'vegas') {
+        vBtn.className = 'flex-1 py-2 text-center border-b-2 border-emerald-600 text-emerald-700 font-extrabold';
+        vView.classList.remove('hidden');
+        renderVegasSubView();
+      } else if (sub === 'bonus') {
+        bBtn.className = 'flex-1 py-2 text-center border-b-2 border-emerald-600 text-emerald-700 font-extrabold';
+        bView.classList.remove('hidden');
+        renderBonusSubView();
+      } else {
+        pBtn.className = 'flex-1 py-2 text-center border-b-2 border-emerald-600 text-emerald-700 font-extrabold';
+        pView.classList.remove('hidden');
+        renderPersonalSelectBox();
+      }
+    }
+
+    // --- 18ホール グリッド切り替え描画 ---
+    function renderHoleGrids() {
+      const outWrap = document.getElementById('holeGridOut');
+      const inWrap = document.getElementById('holeGridIn');
+      outWrap.innerHTML = '';
+      inWrap.innerHTML = '';
+
+      HOLE_DEFS.forEach(h => {
+        const btn = document.createElement('button');
+        const isCur = (h.num === currentHole);
+
+        let doneCount = 0;
+        if (roomData && roomData.scores && roomData.scores['h' + h.num]) {
+          const sc = roomData.scores['h' + h.num];
+          Object.keys(roomData.players || {}).forEach(pid => {
+            if (sc[pid] && sc[pid].done) doneCount++;
+          });
+        }
+
+        let bg = isCur ? 'bg-emerald-600 text-white shadow ring-2 ring-emerald-400' : 'bg-slate-50 text-slate-700 hover:bg-slate-100';
+        if (!isCur && doneCount === 10) bg = 'bg-emerald-100 text-emerald-800 font-black';
+
+        btn.className = `py-1.5 px-0.5 rounded flex flex-col items-center justify-center transition-all ${bg}`;
+        btn.innerHTML = `
+          <span class="text-[11px] font-extrabold leading-tight">${h.num}H</span>
+          <span class="text-[9px] text-slate-400 ${isCur ? 'text-white' : ''}">P${h.par}</span>
+          <span class="text-[8px] ${doneCount === 10 ? 'text-emerald-700' : 'text-slate-400'}">${doneCount}/10</span>
+        `;
+        btn.onclick = () => onSelectHole(h.num);
+
+        if (h.num <= 9) outWrap.appendChild(btn);
+        else inWrap.appendChild(btn);
+      });
+
+      const curDef = HOLE_DEFS[currentHole - 1];
+      const typeStr = curDef.type ? ` [${curDef.type}]` : '';
+      document.getElementById('holeInfoText').innerText = `${curDef.num}H (Par ${curDef.par})${typeStr}`;
+    }
+
+    function onSelectHole(holeNum) {
+      if (currentHole !== holeNum) {
+        const curDef = HOLE_DEFS[currentHole - 1];
+        if (curDef.type) {
+          const w = (roomData.titles && roomData.titles['h' + currentHole]) || 'none';
+          if (w === 'none') {
+            showToast(`⚠️ ${currentHole}Hの${curDef.type}（タイトル）が未選択です`);
+            return;
+          }
+        }
+      }
+      currentHole = holeNum;
+      renderHoleGrids();
+      renderScoreCards();
+    }
+
+    // --- スコア入力カード描画 (完全キーボードレス) ---
+    function renderScoreCards() {
+      if (!roomData || !roomData.players) return;
+      const hDef = HOLE_DEFS[currentHole - 1];
+      const hKey = 'h' + currentHole;
+      const hScores = (roomData.scores && roomData.scores[hKey]) || {};
+
+      // タイトル選択バナー
+      const banner = document.getElementById('titleBanner');
+      if (hDef.type) {
+        banner.classList.remove('hidden');
+        document.getElementById('titleBadge').innerText = `${hDef.type} 対象ホール`;
+        const sel = document.getElementById('titleWinnerSelect');
+        const curW = (roomData.titles && roomData.titles[hKey]) || 'none';
+        sel.innerHTML = `
+          <option value="none" ${curW === 'none' ? 'selected' : ''}>⚠️ 未選択</option>
+          <option value="carry" ${curW === 'carry' ? 'selected' : ''}>該当者なし（次へ持ち越し）</option>
+        `;
+        Object.keys(roomData.players).forEach(pid => {
+          const p = roomData.players[pid];
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.innerText = p.name;
+          if (curW === p.id) opt.selected = true;
+          sel.appendChild(opt);
         });
+      } else {
+        banner.classList.add('hidden');
+      }
 
+      // 10名カード
+      const container = document.getElementById('playerCardsContainer');
+      container.innerHTML = '';
+
+      Object.keys(roomData.players).forEach(pid => {
+        const player = roomData.players[pid];
+        const sc = hScores[pid] || {
+          gross: hDef.par,
+          chipIn: false,
+          saoIchi: false,
+          sunaIchi: false,
+          onePut: false,
+          ob: false,
+          ike: false,
+          bunker: false,
+          threePut: false,
+          done: false
+        };
+
+        // 前ホール完了ロック判定
+        let isLocked = false;
+        if (currentHole > 1) {
+          const prevSc = (roomData.scores && roomData.scores['h' + (currentHole - 1)] && roomData.scores['h' + (currentHole - 1)][pid]);
+          if (!prevSc || !prevSc.done) {
+            isLocked = true;
+          }
+        }
+
+        const hdcpOffset = getPlayerHoleHdcp(player, hDef);
+        const netScore = sc.gross + hdcpOffset;
+        const isDone = !!sc.done;
+
+        let cardBg = 'bg-white border-slate-200';
+        if (isDone) cardBg = 'bg-slate-200/80 border-slate-300 opacity-90';
+        if (isLocked) cardBg = 'bg-slate-100 border-dashed border-slate-300 opacity-60';
+
+        let hdcpBadge = '';
+        if (hdcpOffset !== 0) {
+          const sign = hdcpOffset > 0 ? `+${hdcpOffset}` : `${hdcpOffset}`;
+          hdcpBadge = `<span class="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-1.5 py-0.5 rounded ml-1">HDCP ${sign}</span>`;
+        }
+
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-xl border shadow-sm transition-all ${cardBg}`;
         card.innerHTML = `
-          <div>
-            <span class="font-bold text-emerald-800">Hole ${item.hole}</span>
-            <span class="ml-2 font-semibold text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded">${item.titleType}</span>
-            <span class="ml-2 text-xs text-slate-500">懸賞プール: <strong class="text-slate-700">${item.pool} P</strong></span>
-            ${item.blocked ? '<span class="ml-2 text-xs font-bold text-red-600">[上限阻止成立 0P]</span>' : ''}
+          <div class="flex justify-between items-center mb-2">
+            <div class="flex items-center">
+              <span class="font-extrabold text-sm text-slate-800">${player.name}</span>
+              ${hdcpBadge}
+            </div>
+            <div>
+              ${isLocked 
+                ? `<span class="text-xs bg-slate-300 text-slate-700 px-2.5 py-1 rounded font-bold">🔒 前H未完了</span>`
+                : isDone
+                  ? `<button onclick="toggleDone('${pid}', false)" class="bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold text-xs px-3 py-1 rounded-lg shadow-sm">✏️ 修正する</button>`
+                  : `<button onclick="toggleDone('${pid}', true)" class="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs px-3 py-1 rounded-lg shadow-sm">✅ 入力完了</button>`
+              }
+            </div>
           </div>
-          <div class="flex items-center space-x-2">
-            <label class="text-xs text-slate-600">獲得者:</label>
-            <select onchange="setTitleWinner(${item.hole}, this.value)" class="text-xs p-1.5 border rounded bg-white">
-              ${winnerOptions}
-            </select>
+
+          <!-- 打数ステッパー (Net同時表示) -->
+          <div class="flex items-center justify-between bg-slate-50 p-2 rounded-lg mb-2 ${isDone || isLocked ? 'pointer-events-none' : ''}">
+            <div class="text-xs font-bold text-slate-600">
+              グロス打数
+              <div class="text-[11px] text-emerald-700 font-black">Net: ${netScore} 打</div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="changeGross('${pid}', -1)" class="w-10 h-9 bg-white border border-slate-300 text-slate-800 rounded-lg font-black text-lg active:bg-slate-200 flex items-center justify-center shadow-sm">➖</button>
+              <span class="font-black text-xl w-8 text-center text-slate-900">${sc.gross}</span>
+              <button onclick="changeGross('${pid}', 1)" class="w-10 h-9 bg-white border border-slate-300 text-slate-800 rounded-lg font-black text-lg active:bg-slate-200 flex items-center justify-center shadow-sm">➕</button>
+            </div>
+          </div>
+
+          <!-- 小技ボーナス (タップトグル・連動) -->
+          <div class="mb-2 ${isDone || isLocked ? 'pointer-events-none' : ''}">
+            <div class="text-[10px] font-bold text-slate-400 mb-1">小技ボーナス</div>
+            <div class="grid grid-cols-4 gap-1.5 text-xs font-bold">
+              <button onclick="toggleBonus('${pid}', 'chipIn')" class="py-1.5 rounded border ${sc.chipIn ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'}">
+                チップイン<br><span class="text-[9px] font-normal">+2P</span>
+              </button>
+              <button onclick="toggleBonus('${pid}', 'saoIchi')" class="py-1.5 rounded border ${sc.saoIchi ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'}">
+                サオイチ<br><span class="text-[9px] font-normal">+1P(連動)</span>
+              </button>
+              <button onclick="toggleBonus('${pid}', 'sunaIchi')" class="py-1.5 rounded border ${sc.sunaIchi ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'}">
+                砂イチ<br><span class="text-[9px] font-normal">+1P(連動)</span>
+              </button>
+              <button onclick="toggleBonus('${pid}', 'onePut')" class="py-1.5 rounded border ${sc.onePut ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200'}">
+                ワンパット<br><span class="text-[9px] font-normal">+1P</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ペナルティ (タップトグル) -->
+          <div class="${isDone || isLocked ? 'pointer-events-none' : ''}">
+            <div class="text-[10px] font-bold text-slate-400 mb-1">ペナルティ (各 -1P)</div>
+            <div class="grid grid-cols-4 gap-1.5 text-xs font-bold">
+              <button onclick="togglePenalty('${pid}', 'ob')" class="py-1 rounded border ${sc.ob ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-700 border-slate-200'}">OB</button>
+              <button onclick="togglePenalty('${pid}', 'ike')" class="py-1 rounded border ${sc.ike ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-700 border-slate-200'}">池</button>
+              <button onclick="togglePenalty('${pid}', 'bunker')" class="py-1 rounded border ${sc.bunker ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-700 border-slate-200'}">砂(バンカー)</button>
+              <button onclick="togglePenalty('${pid}', 'threePut')" class="py-1 rounded border ${sc.threePut ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-700 border-slate-200'}">3パット↑</button>
+            </div>
           </div>
         `;
         container.appendChild(card);
       });
     }
 
-    // --- 入力ロジック & UI自動連動 ---
-    function updateScore(playerId, key, val) {
-      if (val < 1) val = 1;
-      appState.scores[currentHole][playerId][key] = val;
-      persistAndRefresh();
+    // --- リアルタイムデータ更新 ---
+    function changeGross(pid, delta) {
+      const hKey = 'h' + currentHole;
+      const curGross = (roomData.scores && roomData.scores[hKey] && roomData.scores[hKey][pid] && roomData.scores[hKey][pid].gross) || HOLE_DEFS[currentHole - 1].par;
+      const nextGross = Math.max(1, curGross + delta);
+      db.ref(`rooms/${currentRoomId}/scores/${hKey}/${pid}/gross`).set(nextGross);
     }
 
-    function toggleBonus(playerId, key) {
-      const cur = appState.scores[currentHole][playerId][key];
-      appState.scores[currentHole][playerId][key] = !cur;
-      persistAndRefresh();
-    }
+    function toggleBonus(pid, type) {
+      const hKey = 'h' + currentHole;
+      const sc = (roomData.scores && roomData.scores[hKey] && roomData.scores[hKey][pid]) || {};
+      const updates = {};
+      const curVal = !!sc[type];
 
-    // サオイチ連動: タップでサオイチ反転 ＆ ワンパットを自動点灯
-    function toggleSaoIchi(playerId) {
-      const sc = appState.scores[currentHole][playerId];
-      const nextState = !sc.saoIchi;
-      sc.saoIchi = nextState;
-      if (nextState) {
-        sc.onePutt = true; // ワンパット自動点灯
-      }
-      persistAndRefresh();
-    }
-
-    // 砂イチ連動: タップで砂イチ反転 ＆ バンカー(+1)とワンパット自動点灯
-    function toggleSunaIchi(playerId) {
-      const sc = appState.scores[currentHole][playerId];
-      const nextState = !sc.sunaIchi;
-      sc.sunaIchi = nextState;
-      if (nextState) {
-        if (sc.bunker === 0) sc.bunker = 1; // バンカーペナルティ自動点灯
-        sc.onePutt = true;                // ワンパット自動点灯
-      }
-      persistAndRefresh();
-    }
-
-    function stepPenalty(playerId, key) {
-      const cur = appState.scores[currentHole][playerId][key] || 0;
-      appState.scores[currentHole][playerId][key] = (cur + 1) % 4; // 0 -> 1 -> 2 -> 3 -> 0
-      persistAndRefresh();
-    }
-
-    function setTitleWinner(hole, playerIdStr) {
-      const pId = parseInt(playerIdStr, 10);
-      if (pId === 0) {
-        delete appState.titleWinners[hole];
+      if (type === 'saoIchi') {
+        const next = !curVal;
+        updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/saoIchi`] = next;
+        if (next) updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/onePut`] = true;
+      } else if (type === 'sunaIchi') {
+        const next = !curVal;
+        updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/sunaIchi`] = next;
+        if (next) {
+          updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/bunker`] = true;
+          updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/onePut`] = true;
+        }
       } else {
-        appState.titleWinners[hole] = pId;
+        updates[`rooms/${currentRoomId}/scores/${hKey}/${pid}/${type}`] = !curVal;
       }
-      persistAndRefresh();
+      db.ref().update(updates);
     }
 
-    function changeHole(diff) {
-      currentHole += diff;
-      if (currentHole < 1) currentHole = 1;
-      if (currentHole > 18) currentHole = 18;
-      renderAll();
+    function togglePenalty(pid, type) {
+      const hKey = 'h' + currentHole;
+      const sc = (roomData.scores && roomData.scores[hKey] && roomData.scores[hKey][pid]) || {};
+      db.ref(`rooms/${currentRoomId}/scores/${hKey}/${pid}/${type}`).set(!sc[type]);
     }
 
-    function switchTab(tab) {
-      ['input', 'leaderboard', 'titles'].forEach(t => {
-        document.getElementById(`view-${t}`).classList.add('hidden');
-        document.getElementById(`tab-${t}`).className = 'flex-1 py-2 text-center text-sm font-bold bg-slate-200 text-slate-600 rounded-t shadow-sm';
+    function toggleDone(pid, doneState) {
+      if (doneState) {
+        const curDef = HOLE_DEFS[currentHole - 1];
+        if (curDef.type) {
+          const val = (roomData.titles && roomData.titles['h' + currentHole]) || 'none';
+          if (val === 'none') {
+            showToast(`⚠️ タイトル（${curDef.type}）の獲得者を選択してください`);
+            return;
+          }
+        }
+      }
+      const hKey = 'h' + currentHole;
+      db.ref(`rooms/${currentRoomId}/scores/${hKey}/${pid}/done`).set(doneState);
+    }
+
+    function onTitleWinnerChange(winner) {
+      const hKey = 'h' + currentHole;
+      db.ref(`rooms/${currentRoomId}/titles/${hKey}`).set(winner);
+    }
+
+    // --- HDCP適用判定 ---
+    function getPlayerHoleHdcp(player, holeDef) {
+      if (!player) return 0;
+      const scope = player.hdcpScope || 'all';
+      const val = parseInt(player.hdcpVal || 0, 10);
+      if (val === 0 || scope === 'none') return 0;
+
+      if (scope === 'all') return val;
+      if (scope === 'par45' && (holeDef.par === 4 || holeDef.par === 5)) return val;
+      if (scope === 'par4' && holeDef.par === 4) return val;
+      return 0;
+    }
+
+    // --- 全自動玉突き計算エンジン ---
+    function calculateTournament() {
+      if (!roomData || !roomData.players) return null;
+      const pids = Object.keys(roomData.players);
+
+      const stats = {};
+      pids.forEach(pid => {
+        stats[pid] = {
+          player: roomData.players[pid],
+          completedHoles: 0,
+          grossTotal: 0,
+          netTotal: 0,
+          scoreP: 0,
+          gameP: 0,
+          vegasP: 0,
+          titleP: 0,
+          totalP: 0,
+          holeDetails: {}
+        };
       });
-      document.getElementById(`view-${tab}`).classList.remove('hidden');
-      document.getElementById(`tab-${tab}`).className = 'flex-1 py-2 text-center text-sm font-bold bg-white text-emerald-800 border-b-2 border-emerald-600 rounded-t shadow-sm';
-    }
 
-    // --- データ保存・同期 ---
-    function persistAndRefresh() {
-      saveToLocalStorage();
-      syncToFirebase();
-      renderAll();
-    }
-
-    function saveToLocalStorage() {
-      localStorage.setItem('golf_comp_state', JSON.stringify(appState));
-    }
-
-    function loadFromLocalStorage() {
-      const saved = localStorage.getItem('golf_comp_state');
-      if (saved) {
-        try {
-          appState = JSON.parse(saved);
-        } catch (e) {
-          console.error(e);
+      // 1. タイトル持ち越し・上限20P・ブロッカー計算
+      let carryPoints = 0;
+      HOLE_DEFS.forEach(hDef => {
+        const hKey = 'h' + hDef.num;
+        if (hDef.type) {
+          const winner = (roomData.titles && roomData.titles[hKey]) || 'none';
+          const pool = Math.min(20, 10 + carryPoints);
+          if (winner === 'carry') {
+            carryPoints = pool;
+          } else if (winner !== 'none') {
+            carryPoints = 0; // 獲得またはブロッカーでリセット
+            if (stats[winner]) {
+              const currentT = stats[winner].titleP;
+              const allowed = Math.max(0, 20 - currentT);
+              const gain = Math.min(pool, allowed);
+              stats[winner].titleP += gain;
+            }
+          }
         }
-      }
-      const savedConfig = localStorage.getItem('golf_fb_config');
-      const savedPath = localStorage.getItem('golf_fb_path');
-      if (savedConfig && savedPath) {
-        document.getElementById('firebaseConfigInput').value = savedConfig;
-        document.getElementById('firebaseRoomInput').value = savedPath;
-        initFirebase(JSON.parse(savedConfig), savedPath);
-      }
-    }
+      });
 
-    function toggleSettingsModal() {
-      document.getElementById('settingsModal').classList.toggle('hidden');
-    }
+      // 2. ホール別スコアP、ゲームP、ネット打数集計
+      const holeNetScores = {};
+      const holeAllDone = {};
 
-    function saveFirebaseSettings() {
-      const configStr = document.getElementById('firebaseConfigInput').value.trim();
-      const pathStr = document.getElementById('firebaseRoomInput').value.trim() || 'golf_comp_default';
-      if (!configStr) {
-        alert('Config JSONを入力してください');
-        return;
-      }
-      try {
-        const config = JSON.parse(configStr);
-        localStorage.setItem('golf_fb_config', configStr);
-        localStorage.setItem('golf_fb_path', pathStr);
-        initFirebase(config, pathStr);
-        toggleSettingsModal();
-      } catch (e) {
-        alert('Config JSONの形式が不正です');
-      }
-    }
+      HOLE_DEFS.forEach(hDef => {
+        const hNum = hDef.num;
+        const hKey = 'h' + hNum;
+        const sc = (roomData.scores && roomData.scores[hKey]) || {};
+        holeNetScores[hNum] = {};
+        let doneCount = 0;
 
-    function initFirebase(config, path) {
-      try {
-        if (!firebase.apps.length) {
-          firebase.initializeApp(config);
-        }
-        firebaseDb = firebase.database();
-        compPath = path;
+        pids.forEach(pid => {
+          const player = roomData.players[pid];
+          const pSc = sc[pid];
+          if (pSc && pSc.done) {
+            doneCount++;
+            stats[pid].completedHoles++;
 
-        document.getElementById('syncBadge').textContent = 'クラウド同期中';
-        document.getElementById('syncBadge').className = 'text-xs bg-emerald-600 text-white px-2.5 py-1 rounded-full font-bold';
+            const hdcp = getPlayerHoleHdcp(player, hDef);
+            const net = pSc.gross + hdcp;
+            holeNetScores[hNum][pid] = net;
+            stats[pid].grossTotal += pSc.gross;
+            stats[pid].netTotal += net;
 
-        // リモート購読
-        firebaseDb.ref(compPath).on('value', snapshot => {
-          const val = snapshot.val();
-          if (val) {
-            appState = val;
-            renderAll();
+            // スコアP判定 (ネット基準)
+            const diff = net - hDef.par;
+            let sP = 0;
+            if (diff <= -2) sP = 3;
+            else if (diff === -1) sP = 2;
+            else if (diff === 0) sP = 1;
+            stats[pid].scoreP += sP;
+
+            // ゲームP判定
+            let gP = 0;
+            if (pSc.chipIn) gP += 2;
+            if (pSc.saoIchi) gP += 1;
+            if (pSc.sunaIchi) gP += 1;
+            if (pSc.onePut) gP += 1;
+            if (pSc.ob) gP -= 1;
+            if (pSc.ike) gP -= 1;
+            if (pSc.bunker) gP -= 1;
+            if (pSc.threePut) gP -= 1;
+            stats[pid].gameP += gP;
+
+            stats[pid].holeDetails[hNum] = {
+              gross: pSc.gross,
+              net: net,
+              scoreP: sP,
+              gameP: gP,
+              pSc: pSc
+            };
           }
         });
-      } catch (err) {
-        console.error(err);
-        alert('Firebase接続エラー: ' + err.message);
-      }
+        holeAllDone[hNum] = (doneCount === 10);
+      });
+
+      // 3. ラスベガス たすき掛け計算 (前H全員完了まで非公開)
+      const vegasResults = {};
+
+      HOLE_DEFS.forEach(hDef => {
+        const hNum = hDef.num;
+        let ready = false;
+        let pairs = [];
+
+        if (hNum === 1) {
+          ready = true;
+          pairs = (roomData.vegasSetup && roomData.vegasSetup.h1) || [
+            ['p1', 'p10'], ['p2', 'p9'], ['p3', 'p8'], ['p4', 'p7'], ['p5', 'p6']
+          ];
+        } else {
+          // 前ホールの10名全員が完了している場合のみ確定
+          if (holeAllDone[hNum - 1]) {
+            ready = true;
+            const sortedPrev = [...pids].sort((a, b) => {
+              const netA = holeNetScores[hNum - 1][a] || 99;
+              const netB = holeNetScores[hNum - 1][b] || 99;
+              return netA - netB;
+            });
+            pairs = [
+              [sortedPrev[0], sortedPrev[9]],
+              [sortedPrev[1], sortedPrev[8]],
+              [sortedPrev[2], sortedPrev[7]],
+              [sortedPrev[3], sortedPrev[6]],
+              [sortedPrev[4], sortedPrev[5]]
+            ];
+          }
+        }
+
+        if (ready) {
+          const teamDatas = pairs.map(pair => {
+            const pidA = pair[0];
+            const pidB = pair[1];
+            const netA = holeNetScores[hNum][pidA];
+            const netB = holeNetScores[hNum][pidB];
+            let teamVal = null;
+            if (netA !== undefined && netB !== undefined) {
+              const low = Math.min(netA, netB);
+              const high = Math.max(netA, netB);
+              teamVal = low * 10 + high;
+            }
+            return { p1: pidA, p2: pidB, val: teamVal, points: 0, rank: 0 };
+          });
+
+          const allCalculated = teamDatas.every(t => t.val !== null);
+          if (allCalculated) {
+            teamDatas.sort((a, b) => a.val - b.val);
+            const ptsTemplate = [3, 2, 1, 0, 0];
+            let i = 0;
+            while (i < 5) {
+              let j = i;
+              while (j < 5 && teamDatas[j].val === teamDatas[i].val) j++;
+              const count = j - i;
+              let sumP = 0;
+              for (let k = i; k < j; k++) sumP += ptsTemplate[k];
+              const share = sumP / count;
+              for (let k = i; k < j; k++) {
+                teamDatas[k].points = share;
+                teamDatas[k].rank = i + 1;
+              }
+              i = j;
+            }
+
+            teamDatas.forEach(t => {
+              stats[t.p1].vegasP += t.points;
+              stats[t.p2].vegasP += t.points;
+            });
+          }
+
+          vegasResults[hNum] = { ready: true, teams: teamDatas };
+        } else {
+          vegasResults[hNum] = { ready: false, teams: [] };
+        }
+      });
+
+      // 4. 総合ポイント合算
+      pids.forEach(pid => {
+        const s = stats[pid];
+        s.totalP = s.scoreP + s.gameP + s.vegasP + s.titleP;
+      });
+
+      return { stats, vegasResults, holeNetScores, holeAllDone };
     }
 
-    function syncToFirebase() {
-      if (firebaseDb) {
-        firebaseDb.ref(compPath).set(appState);
-      }
+    // --- 順位確認リーダーボード描画 ---
+    function renderLeaderboard() {
+      const calc = calculateTournament();
+      if (!calc) return;
+      const { stats } = calc;
+
+      const sortedList = Object.values(stats).sort((a, b) => {
+        if (b.totalP !== a.totalP) return b.totalP - a.totalP;
+        return a.netTotal - b.netTotal;
+      });
+
+      const tbody = document.getElementById('leaderboardBody');
+      tbody.innerHTML = '';
+
+      sortedList.forEach((st, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60';
+
+        let rankBadge = `<span class="font-bold text-slate-500">${idx + 1}</span>`;
+        if (idx === 0) rankBadge = `<span class="bg-amber-400 text-slate-900 font-extrabold w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px]">1</span>`;
+        else if (idx === 1) rankBadge = `<span class="bg-slate-300 text-slate-900 font-extrabold w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px]">2</span>`;
+        else if (idx === 2) rankBadge = `<span class="bg-amber-600 text-white font-extrabold w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px]">3</span>`;
+
+        tr.innerHTML = `
+          <td class="py-2 px-1 text-center">${rankBadge}</td>
+          <td class="py-2 px-2 font-bold text-slate-800">${st.player.name}</td>
+          <td class="py-2 px-1 text-center font-bold text-slate-500">${st.completedHoles}H</td>
+          <td class="py-2 px-2 text-right font-black text-emerald-700 text-sm">${st.totalP.toFixed(1)}</td>
+          <td class="py-2 px-1 text-right font-medium text-slate-500">${st.scoreP}</td>
+          <td class="py-2 px-1 text-right font-medium text-slate-500">${st.gameP}</td>
+          <td class="py-2 px-1 text-right font-medium text-slate-500">${st.vegasP.toFixed(1)}</td>
+          <td class="py-2 px-1 text-right font-medium text-slate-500">${st.titleP}</td>
+          <td class="py-2 px-1.5 text-right font-bold text-slate-700">${st.netTotal}</td>
+          <td class="py-2 px-1.5 text-right text-slate-400">${st.grossTotal}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      if (activeRankSubTab === 'vegas') renderVegasSubView();
+      else if (activeRankSubTab === 'bonus') renderBonusSubView();
+      else renderPersonalCard(document.getElementById('personalSelect').value || 'p1');
+    }
+
+    // サブタブ1: ラスベガス詳細
+    function renderVegasSubView() {
+      const calc = calculateTournament();
+      if (!calc) return;
+      const { vegasResults } = calc;
+      const container = document.getElementById('vegasHolesList');
+      container.innerHTML = '';
+
+      HOLE_DEFS.forEach(hDef => {
+        const hNum = hDef.num;
+        const res = vegasResults[hNum];
+        const card = document.createElement('div');
+        card.className = 'border border-slate-200 rounded-lg p-2.5 bg-slate-50';
+
+        if (!res.ready) {
+          card.innerHTML = `
+            <div class="flex justify-between items-center text-xs">
+              <span class="font-extrabold text-slate-700">${hNum}H (Par ${hDef.par})</span>
+              <span class="text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded text-[11px]">⚠️ チーム未確定 (前H全員完了待ち)</span>
+            </div>
+          `;
+        } else {
+          let rows = '';
+          res.teams.forEach(t => {
+            const p1Name = roomData.players[t.p1]?.name || t.p1;
+            const p2Name = roomData.players[t.p2]?.name || t.p2;
+            const scoreStr = t.val !== null ? `${t.val}組` : '計算中';
+            const ptsStr = t.val !== null ? `+${t.points.toFixed(1)}P` : '-';
+            rows += `
+              <div class="flex justify-between items-center text-xs py-1 border-t border-slate-100">
+                <span class="font-bold text-slate-800">${p1Name} & ${p2Name}</span>
+                <div class="flex items-center space-x-3">
+                  <span class="font-mono font-bold text-slate-600">${scoreStr}</span>
+                  <span class="font-extrabold text-emerald-700 text-right w-12">${ptsStr}</span>
+                </div>
+              </div>
+            `;
+          });
+
+          card.innerHTML = `
+            <div class="flex justify-between items-center text-xs font-bold text-slate-700 mb-1">
+              <span>${hNum}H (Par ${hDef.par})</span>
+              <span class="text-emerald-700 text-[11px]">確定ペア</span>
+            </div>
+            <div class="bg-white rounded p-1.5 border border-slate-100 divide-y divide-slate-100">
+              ${rows}
+            </div>
+          `;
+        }
+        container.appendChild(card);
+      });
+    }
+
+    // サブタブ2: ボーナス一覧
+    function renderBonusSubView() {
+      const container = document.getElementById('bonusHolesList');
+      container.innerHTML = '';
+
+      HOLE_DEFS.forEach(hDef => {
+        const hNum = hDef.num;
+        const hKey = 'h' + hNum;
+        const sc = (roomData.scores && roomData.scores[hKey]) || {};
+        const titleWinner = (roomData.titles && roomData.titles[hKey]) || 'none';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'border border-slate-200 rounded-lg p-2.5 bg-slate-50';
+
+        let titleBadge = '';
+        if (hDef.type) {
+          let wName = '未確定';
+          if (titleWinner === 'carry') wName = '該当なし(持越)';
+          else if (roomData.players[titleWinner]) wName = roomData.players[titleWinner].name;
+          titleBadge = `<span class="bg-amber-100 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded border border-amber-200">${hDef.type}: ${wName}</span>`;
+        }
+
+        let playersHtml = '';
+        Object.keys(roomData.players).forEach(pid => {
+          const p = roomData.players[pid];
+          const pSc = sc[pid];
+          if (pSc && pSc.done) {
+            const bonuses = [];
+            if (pSc.chipIn) bonuses.push('チップイン(+2)');
+            if (pSc.saoIchi) bonuses.push('サオイチ(+1)');
+            if (pSc.sunaIchi) bonuses.push('砂イチ(+1)');
+            if (pSc.onePut) bonuses.push('1パット(+1)');
+            
+            const penalties = [];
+            if (pSc.ob) penalties.push('OB');
+            if (pSc.ike) penalties.push('池');
+            if (pSc.bunker) penalties.push('砂');
+            if (pSc.threePut) penalties.push('3パット');
+
+            playersHtml += `
+              <div class="text-[11px] py-1 border-t border-slate-100 flex justify-between items-center">
+                <span class="font-bold text-slate-800 w-24 shrink-0">${p.name}</span>
+                <span class="text-emerald-700 font-semibold">${bonuses.join(', ') || '-'}</span>
+                <span class="text-red-600 font-semibold">${penalties.join(', ') || '-'}</span>
+              </div>
+            `;
+          }
+        });
+
+        wrap.innerHTML = `
+          <div class="flex justify-between items-center mb-1 text-xs">
+            <span class="font-extrabold text-slate-700">${hNum}H (Par ${hDef.par})</span>
+            ${titleBadge}
+          </div>
+          <div class="bg-white rounded p-1.5 border border-slate-100">
+            ${playersHtml || '<div class="text-xs text-slate-400 py-1">完了データなし</div>'}
+          </div>
+        `;
+        container.appendChild(wrap);
+      });
+    }
+
+    // サブタブ3: 個人詳細カード
+    function renderPersonalSelectBox() {
+      const sel = document.getElementById('personalSelect');
+      const cur = sel.value;
+      sel.innerHTML = '';
+      Object.keys(roomData.players).forEach(pid => {
+        const p = roomData.players[pid];
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.innerText = p.name;
+        if (p.id === cur) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      renderPersonalCard(sel.value || 'p1');
+    }
+
+    function renderPersonalCard(pid) {
+      const calc = calculateTournament();
+      if (!calc) return;
+      const { stats, vegasResults } = calc;
+      const st = stats[pid];
+      if (!st) return;
+
+      const container = document.getElementById('personalCardContent');
+      let tableRows = '';
+
+      HOLE_DEFS.forEach(hDef => {
+        const hNum = hDef.num;
+        const det = st.holeDetails[hNum];
+        const vRes = vegasResults[hNum];
+        
+        let vegasPartner = '未確定';
+        let vegasGain = '-';
+        if (vRes && vRes.ready) {
+          const t = vRes.teams.find(tm => tm.p1 === pid || tm.p2 === pid);
+          if (t) {
+            const partnerId = t.p1 === pid ? t.p2 : t.p1;
+            vegasPartner = roomData.players[partnerId]?.name || partnerId;
+            if (t.val !== null) vegasGain = `+${t.points.toFixed(1)}P`;
+          }
+        }
+
+        if (det) {
+          tableRows += `
+            <tr class="border-b border-slate-100 text-[11px]">
+              <td class="py-1.5 px-1 font-bold text-center">${hNum}H</td>
+              <td class="py-1.5 px-1 text-center font-bold text-slate-700">${det.net} <span class="text-[9px] text-slate-400">(${det.gross})</span></td>
+              <td class="py-1.5 px-1 text-center font-bold text-emerald-700">+${det.scoreP}</td>
+              <td class="py-1.5 px-1 text-center font-bold ${det.gameP >= 0 ? 'text-emerald-700' : 'text-red-600'}">${det.gameP > 0 ? '+' : ''}${det.gameP}</td>
+              <td class="py-1.5 px-1 text-center">${vegasPartner}</td>
+              <td class="py-1.5 px-1 text-center font-bold text-emerald-700">${vegasGain}</td>
+            </tr>
+          `;
+        } else {
+          tableRows += `
+            <tr class="border-b border-slate-100 text-[11px] text-slate-400">
+              <td class="py-1.5 px-1 text-center">${hNum}H</td>
+              <td class="py-1.5 px-1 text-center">-</td>
+              <td class="py-1.5 px-1 text-center">-</td>
+              <td class="py-1.5 px-1 text-center">-</td>
+              <td class="py-1.5 px-1 text-center">${vegasPartner}</td>
+              <td class="py-1.5 px-1 text-center">-</td>
+            </tr>
+          `;
+        }
+      });
+
+      container.innerHTML = `
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-2.5 mb-2 flex justify-between items-center text-xs">
+          <div>
+            <span class="font-extrabold text-sm text-slate-800">${st.player.name}</span>
+            <div class="text-[10px] text-slate-500">完了: ${st.completedHoles}H / Net計: ${st.netTotal} / Gross計: ${st.grossTotal}</div>
+          </div>
+          <div class="text-right">
+            <span class="font-black text-emerald-700 text-base">${st.totalP.toFixed(1)} P</span>
+            <div class="text-[10px] text-slate-400">総合ポイント</div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse bg-white rounded-lg border border-slate-200">
+            <thead>
+              <tr class="bg-slate-100 text-slate-600 text-[10px] font-bold border-b border-slate-200">
+                <th class="py-1.5 px-1 text-center">H</th>
+                <th class="py-1.5 px-1 text-center">Net(Gr)</th>
+                <th class="py-1.5 px-1 text-center">スコアP</th>
+                <th class="py-1.5 px-1 text-center">ゲームP</th>
+                <th class="py-1.5 px-1 text-center">ペア相手</th>
+                <th class="py-1.5 px-1 text-center">ベガスP</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // --- ルールモーダル制御 ---
+    function openRuleModal() { document.getElementById('ruleModal').classList.remove('hidden'); }
+    function closeRuleModal() { document.getElementById('ruleModal').classList.add('hidden'); }
+
+    // --- トースト通知 ---
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toastMsg').innerText = msg;
+      t.classList.remove('hidden');
+      setTimeout(() => { t.classList.add('hidden'); }, 3000);
     }
   </script>
 </body>
