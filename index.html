@@ -12,10 +12,10 @@
   <!-- Babel Standalone for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    /* モバイル操作時のタップ領域＆スクロールバー制御 */
     body {
       -webkit-tap-highlight-color: transparent;
       user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     .no-scrollbar::-webkit-scrollbar {
       display: none;
@@ -26,7 +26,7 @@
     }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 antialiased min-h-screen">
+<body class="bg-slate-100 text-slate-800 min-h-screen">
 
 <div id="root"></div>
 
@@ -78,31 +78,70 @@ const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
 }));
 
 function App() {
-  // === 主要 State ===
-  const [playerCount, setPlayerCount] = useState(10); // 4〜20名
-  const [players, setPlayers] = useState(DEFAULT_PLAYERS);
-  const [currentHole, setCurrentHole] = useState(1);
-  const [activeTab, setActiveTab] = useState('input'); // 'input' | 'leaderboard'
+  // モード判定: URLクエリ ?mode=player があればプレイヤー画面、なければ幹事画面
+  const [viewMode, setViewMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mode') === 'player' ? 'player' : 'admin';
+  });
+
+  // プレイヤー画面のメインタブ ('input' | 'rankings')
+  const [mainTab, setMainTab] = useState('input');
+  // 順位確認タブ内の3サブタブ ('vegas' | 'bonus' | 'individual')
+  const [rankingSubTab, setRankingSubTab] = useState('vegas');
+
+  // 個人タブで選択中のプレイヤーID
+  const [selectedIndividualPlayerId, setSelectedIndividualPlayerId] = useState('p1');
+
+  // 総合リーダーボードソート状態
+  const [sortField, setSortField] = useState('finalP');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  // LocalStorage永続化 State
+  const [playerCount, setPlayerCount] = useState(() => {
+    const saved = localStorage.getItem('gv_player_count');
+    return saved ? parseInt(saved, 10) : 10;
+  });
+
+  const [players, setPlayers] = useState(() => {
+    const saved = localStorage.getItem('gv_players');
+    return saved ? JSON.parse(saved) : DEFAULT_PLAYERS;
+  });
+
+  const [currentHole, setCurrentHole] = useState(() => {
+    const saved = localStorage.getItem('gv_current_hole');
+    return saved ? parseInt(saved, 10) : 1;
+  });
+
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [ruleModalTab, setRuleModalTab] = useState(1);
-  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
 
-  // 1ホール目のランダムシード（初回生成）
-  const [h1RandomOrder, setH1RandomOrder] = useState([]);
+  const [titleWinners, setTitleWinners] = useState(() => {
+    const saved = localStorage.getItem('gv_title_winners');
+    return saved ? JSON.parse(saved) : {};
+  });
 
-  // タイトルP 獲得者: { holeNum: playerId | 'NONE' | null }
-  const [titleWinners, setTitleWinners] = useState({});
-
-  // 各プレイヤーの全18ホールスコアデータ
-  // scores[hole][playerId] = { gross, chipIn, onePat, saoIchi, sunaIchi, ob, water, bunker, threePat, isCompleted }
   const [scores, setScores] = useState(() => {
+    const saved = localStorage.getItem('gv_scores');
+    if (saved) return JSON.parse(saved);
     const init = {};
-    for (let h = 1; h <= 18; h++) {
-      init[h] = {};
-    }
+    for (let h = 1; h <= 18; h++) init[h] = {};
     return init;
   });
+
+  const [h1RandomOrder, setH1RandomOrder] = useState(() => {
+    const saved = localStorage.getItem('gv_h1_random');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // LocalStorage 同期保存
+  useEffect(() => { localStorage.setItem('gv_player_count', playerCount); }, [playerCount]);
+  useEffect(() => { localStorage.setItem('gv_players', JSON.stringify(players)); }, [players]);
+  useEffect(() => { localStorage.setItem('gv_current_hole', currentHole); }, [currentHole]);
+  useEffect(() => { localStorage.setItem('gv_title_winners', JSON.stringify(titleWinners)); }, [titleWinners]);
+  useEffect(() => { localStorage.setItem('gv_scores', JSON.stringify(scores)); }, [scores]);
+  useEffect(() => { localStorage.setItem('gv_h1_random', JSON.stringify(h1RandomOrder)); }, [h1RandomOrder]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -124,12 +163,14 @@ function App() {
     return raw;
   }, [players, playerCount]);
 
-  // 1H用ランダム順序の初期化・更新
+  // 1H用ランダム順序の同期
   useEffect(() => {
     const ids = activePlayers.map(p => p.id);
-    const shuffled = [...ids].sort(() => Math.random() - 0.5);
-    setH1RandomOrder(shuffled);
-  }, [playerCount]);
+    if (h1RandomOrder.length !== ids.length || !h1RandomOrder.every(id => ids.includes(id))) {
+      const shuffled = [...ids].sort(() => Math.random() - 0.5);
+      setH1RandomOrder(shuffled);
+    }
+  }, [activePlayers]);
 
   // --- HDCP適用判定 ---
   const isHdcpApplicable = (scope, par) => {
@@ -139,78 +180,142 @@ function App() {
     return false;
   };
 
-  // --- プレイヤー×ホールのネットスコア取得 ---
+  // --- プレイヤー×ホールのスコアデータ取得（パット数連動・独立トグル） ---
   const getPlayerScoreData = (holeNum, player) => {
     const par = HOLE_CONFIG[holeNum - 1].par;
     if (player.isGhost) {
       return {
         gross: par + 1,
         net: par + 1,
+        putts: 2,
         chipIn: false,
         onePat: false,
+        threePat: false,
         saoIchi: false,
         sunaIchi: false,
         ob: false,
         water: false,
         bunker: false,
-        threePat: false,
         isCompleted: true
       };
     }
 
     const holeScore = scores[holeNum]?.[player.id];
     const gross = holeScore?.gross !== undefined ? holeScore.gross : par;
+    const putts = holeScore?.putts !== undefined ? holeScore.putts : 2;
+
     const applicable = isHdcpApplicable(player.hdcpScope, par);
     const net = applicable ? gross + player.hdcpVal : gross;
+
+    // パット数による自動判定
+    const chipIn = putts === 0;
+    const onePat = putts === 1;
+    const threePat = putts >= 3;
 
     return {
       gross,
       net,
-      chipIn: holeScore?.chipIn || false,
-      onePat: holeScore?.onePat || false,
+      putts,
+      chipIn,
+      onePat,
+      threePat,
       saoIchi: holeScore?.saoIchi || false,
       sunaIchi: holeScore?.sunaIchi || false,
       ob: holeScore?.ob || false,
       water: holeScore?.water || false,
       bunker: holeScore?.bunker || false,
-      threePat: holeScore?.threePat || false,
       isCompleted: holeScore?.isCompleted || false
     };
   };
 
   // --- ホール単体のボーナス・ペナルティ・スコアP計算 ---
   const calculateHolePoints = (holeNum, player) => {
-    if (player.isGhost) return { scoreP: 0, bonusP: 0, penP: 0, autoBonusP: 0, totalP: 0, bonusCount: 0, penCount: 0 };
+    if (player.isGhost) {
+      return {
+        scoreP: 0,
+        bonusP: 0,
+        penP: 0,
+        autoBonusP: 0,
+        totalP: 0,
+        bonusCount: 0,
+        penCount: 0,
+        isBounceBack: false,
+        isObPar: false,
+        breakdown: []
+      };
+    }
 
     const par = HOLE_CONFIG[holeNum - 1].par;
     const d = getPlayerScoreData(holeNum, player);
+    const breakdown = [];
 
-    // 1. スコアポイント (ネット基準)
+    // 1. スコアポイント (ネット基準: ボギー以上0P)
     const diff = d.net - par;
     let scoreP = 0;
-    if (diff <= -2) scoreP = 3;      // イーグル以上
-    else if (diff === -1) scoreP = 2; // バーディ
-    else if (diff === 0) scoreP = 1;  // パー
-    else scoreP = 0;                  // ボギー以上
+    if (diff <= -2) {
+      scoreP = 3;
+      breakdown.push({ label: 'イーグル以上', p: 3, type: 'bonus' });
+    } else if (diff === -1) {
+      scoreP = 2;
+      breakdown.push({ label: 'バーディ', p: 2, type: 'bonus' });
+    } else if (diff === 0) {
+      scoreP = 1;
+      breakdown.push({ label: 'パー', p: 1, type: 'bonus' });
+    }
 
-    // 2. 小技ボーナス (手動トグル)
+    // 2. 小技ボーナス（パット数自動判定＋独立手動トグル）
     let bonusP = 0;
     let bonusCount = 0;
-    if (d.chipIn) { bonusP += 2; bonusCount++; }
-    if (d.onePat) { bonusP += 1; bonusCount++; }
-    if (d.saoIchi) { bonusP += 1; bonusCount++; } // ワンパットと連動で実質+2P
-    if (d.sunaIchi) { bonusP += 1; bonusCount++; }
+    if (d.chipIn) {
+      bonusP += 2;
+      bonusCount++;
+      breakdown.push({ label: 'チップイン (0パット)', p: 2, type: 'bonus' });
+    }
+    if (d.onePat) {
+      bonusP += 1;
+      bonusCount++;
+      breakdown.push({ label: '1パット', p: 1, type: 'bonus' });
+    }
+    if (d.saoIchi) {
+      bonusP += 1;
+      bonusCount++;
+      breakdown.push({ label: 'サオイチ', p: 1, type: 'bonus' });
+    }
+    if (d.sunaIchi) {
+      bonusP += 1;
+      bonusCount++;
+      breakdown.push({ label: '砂イチ', p: 1, type: 'bonus' });
+    }
 
-    // 3. ペナルティ (手動トグル)
+    // 3. ペナルティ（パット数自動判定＋独立手動トグル）
     let penP = 0;
     let penCount = 0;
-    if (d.ob) { penP -= 1; penCount++; }
-    if (d.water) { penP -= 1; penCount++; }
-    if (d.bunker) { penP -= 1; penCount++; }
-    if (d.threePat) { penP -= 1; penCount++; }
+    if (d.threePat) {
+      penP -= 1;
+      penCount++;
+      breakdown.push({ label: `3パット (${d.putts}打)`, p: -1, type: 'pen' });
+    }
+    if (d.ob) {
+      penP -= 1;
+      penCount++;
+      breakdown.push({ label: 'OB', p: -1, type: 'pen' });
+    }
+    if (d.water) {
+      penP -= 1;
+      penCount++;
+      breakdown.push({ label: '池', p: -1, type: 'pen' });
+    }
+    if (d.bunker) {
+      penP -= 1;
+      penCount++;
+      breakdown.push({ label: 'バンカー', p: -1, type: 'pen' });
+    }
 
-    // 4. 全自動ボーナス (タイブレーク個数には含めない)
+    // 4. 全自動救済ボーナス (グロス基準・タイブレーク除外)
     let autoBonusP = 0;
+    let isBounceBack = false;
+    let isObPar = false;
+
     // (a) バウンスバック賞: 前HグロスPar+2以上 ➔ 当該HでPar基準1打以上改善
     if (holeNum > 1) {
       const prevPar = HOLE_CONFIG[holeNum - 2].par;
@@ -219,38 +324,150 @@ function App() {
       const currDiff = d.gross - par;
       if (prevDiff >= 2 && currDiff < prevDiff) {
         autoBonusP += 1;
+        isBounceBack = true;
+        breakdown.push({ label: 'バウンスバック賞', p: 1, type: 'auto' });
       }
     }
-    // (b) OBパー賞: OBあり ＋ グロスPar+2（ダボ）
+    // (b) OBパー賞: OBあり ＋ グロスPar+2（ダボ耐え）
     if (d.ob && d.gross === par + 2) {
       autoBonusP += 1;
+      isObPar = true;
+      breakdown.push({ label: 'OBパー賞 (ダボ耐え)', p: 1, type: 'auto' });
     }
 
     const totalP = scoreP + bonusP + penP + autoBonusP;
-    return { scoreP, bonusP, penP, autoBonusP, totalP, bonusCount, penCount };
+    return {
+      scoreP,
+      bonusP,
+      penP,
+      autoBonusP,
+      totalP,
+      bonusCount,
+      penCount,
+      isBounceBack,
+      isObPar,
+      breakdown
+    };
   };
 
   // --- 全ホール累計集計（タイブレーク用 & 総合用） ---
   const calculateAccumulatedStats = (upToHole, player) => {
     let cumNet = 0;
     let cumGross = 0;
+    let cumPutts = 0;
     let cumBonusCount = 0;
     let cumPenCount = 0;
     let cumTotalP = 0;
+    let cumScoreP = 0;
+    let cumBonusP = 0;
+    let cumPenP = 0;
+    let cumAutoP = 0;
+
+    let chipInCount = 0;
+    let onePatCount = 0;
+    let saoIchiCount = 0;
+    let sunaIchiCount = 0;
+    let bounceBackCount = 0;
+    let obParCount = 0;
+    let obCount = 0;
+    let waterCount = 0;
+    let bunkerCount = 0;
+    let threePatCount = 0;
+
+    let eagleCount = 0;
+    let birdieCount = 0;
+    let parCount = 0;
+    let bogeyCount = 0;
+    let doubleBogeyPlusCount = 0;
+    let girCount = 0;
+    let completedHolesCount = 0;
+    let penaltyHolesCount = 0;
+    let bunkerHolesCount = 0;
 
     for (let h = 1; h <= upToHole; h++) {
+      const par = HOLE_CONFIG[h - 1].par;
       const d = getPlayerScoreData(h, player);
       const pts = calculateHolePoints(h, player);
+
       cumNet += d.net;
       cumGross += d.gross;
+      cumPutts += d.putts;
       cumBonusCount += pts.bonusCount;
       cumPenCount += pts.penCount;
       cumTotalP += pts.totalP;
+      cumScoreP += pts.scoreP;
+      cumBonusP += pts.bonusP;
+      cumPenP += pts.penP;
+      cumAutoP += pts.autoBonusP;
+
+      if (d.isCompleted) completedHolesCount++;
+
+      if (d.chipIn) chipInCount++;
+      if (d.onePat) onePatCount++;
+      if (d.saoIchi) saoIchiCount++;
+      if (d.sunaIchi) sunaIchiCount++;
+      if (pts.isBounceBack) bounceBackCount++;
+      if (pts.isObPar) obParCount++;
+      if (d.ob) obCount++;
+      if (d.water) waterCount++;
+      if (d.bunker) {
+        bunkerCount++;
+        bunkerHolesCount++;
+      }
+      if (d.threePat) threePatCount++;
+
+      if (d.ob || d.water || d.bunker || d.threePat) {
+        penaltyHolesCount++;
+      }
+
+      // スコア分布（グロス基準）
+      const diff = d.gross - par;
+      if (diff <= -2) eagleCount++;
+      else if (diff === -1) birdieCount++;
+      else if (diff === 0) parCount++;
+      else if (diff === 1) bogeyCount++;
+      else doubleBogeyPlusCount++;
+
+      // パーオン判定 (GIR: グロス - パット <= Par - 2)
+      if (d.gross - d.putts <= par - 2) {
+        girCount++;
+      }
     }
-    return { cumNet, cumGross, cumBonusCount, cumPenCount, cumTotalP };
+
+    return {
+      cumNet,
+      cumGross,
+      cumPutts,
+      cumBonusCount,
+      cumPenCount,
+      cumTotalP,
+      cumScoreP,
+      cumBonusP,
+      cumPenP,
+      cumAutoP,
+      chipInCount,
+      onePatCount,
+      saoIchiCount,
+      sunaIchiCount,
+      bounceBackCount,
+      obParCount,
+      obCount,
+      waterCount,
+      bunkerCount,
+      bunkerHolesCount,
+      threePatCount,
+      eagleCount,
+      birdieCount,
+      parCount,
+      bogeyCount,
+      doubleBogeyPlusCount,
+      girCount,
+      completedHolesCount,
+      penaltyHolesCount
+    };
   };
 
-  // --- 前ホールの生身全員が入力完了しているか判定 ---
+  // 前ホールの生身全員が入力完了しているか判定
   const isPrevHoleAllCompleted = (holeNum) => {
     if (holeNum <= 1) return true;
     const prevHole = holeNum - 1;
@@ -259,7 +476,7 @@ function App() {
       .every(p => scores[prevHole]?.[p.id]?.isCompleted);
   };
 
-  // --- ラスベガス 9段階厳密順位付け (holeNumホールのペア決定用) ---
+  // --- ラスベガス 11段階厳密順位付け ---
   const vegasSortedRank = useMemo(() => {
     const rankMap = {};
     for (let h = 1; h <= 18; h++) {
@@ -274,31 +491,37 @@ function App() {
           const prevD = getPlayerScoreData(prevH, p);
           const prevPts = calculateHolePoints(prevH, p);
           const cum = calculateAccumulatedStats(prevH, p);
+          const prevGameP = prevPts.bonusP + prevPts.penP; // 小技ボーナス - ペナルティ
+
           return {
             player: p,
             prevNet: prevD.net,
             prevGross: prevD.gross,
+            prevGameP: prevGameP,
             prevBonus: prevPts.bonusCount,
             prevPen: prevPts.penCount,
             cumNet: cum.cumNet,
             cumGross: cum.cumGross,
             cumBonus: cum.cumBonusCount,
             cumPen: cum.cumPenCount,
+            hdcpVal: p.hdcpVal,
             originalIndex: activePlayers.findIndex(ap => ap.id === p.id)
           };
         });
 
-        // 9段階ソート
+        // 全11段階タイブレーク
         candidates.sort((a, b) => {
-          if (a.prevNet !== b.prevNet) return a.prevNet - b.prevNet; // 1. 前Hネット少
-          if (a.prevGross !== b.prevGross) return a.prevGross - b.prevGross; // 2. 前Hグロス少
-          if (a.prevBonus !== b.prevBonus) return b.prevBonus - a.prevBonus; // 3. 前H役多
-          if (a.prevPen !== b.prevPen) return a.prevPen - b.prevPen; // 4. 前Hペナ少
-          if (a.cumNet !== b.cumNet) return a.cumNet - b.cumNet; // 5. 累計ネット少
-          if (a.cumGross !== b.cumGross) return a.cumGross - b.cumGross; // 6. 累計グロス少
-          if (a.cumBonus !== b.cumBonus) return b.cumBonus - a.cumBonus; // 7. 累計役多
-          if (a.cumPen !== b.cumPen) return a.cumPen - b.cumPen; // 8. 累計ペナ少
-          return a.originalIndex - b.originalIndex; // 9. ID順
+          if (a.prevNet !== b.prevNet) return a.prevNet - b.prevNet;             // 1. 前Hネット (少)
+          if (a.prevGross !== b.prevGross) return a.prevGross - b.prevGross;     // 2. 前Hグロス (少)
+          if (a.prevGameP !== b.prevGameP) return b.prevGameP - a.prevGameP;     // 3. 前HゲームP (多)
+          if (a.prevBonus !== b.prevBonus) return b.prevBonus - a.prevBonus;     // 4. 前H小技数 (多)
+          if (a.prevPen !== b.prevPen) return a.prevPen - b.prevPen;             // 5. 前Hペナ数 (少)
+          if (a.cumNet !== b.cumNet) return a.cumNet - b.cumNet;                 // 6. 累計ネット (少)
+          if (a.cumGross !== b.cumGross) return a.cumGross - b.cumGross;         // 7. 累計グロス (少)
+          if (a.cumBonus !== b.cumBonus) return b.cumBonus - a.cumBonus;         // 8. 累計ボーナス数 (多)
+          if (a.cumPen !== b.cumPen) return a.cumPen - b.cumPen;                 // 9. 累計ペナルティ数 (少)
+          if (a.hdcpVal !== b.hdcpVal) return a.hdcpVal - b.hdcpVal;             // 10. HDCP値 (小)
+          return a.originalIndex - b.originalIndex;                              // 11. 登録ID順 (昇順)
         });
 
         rankMap[h] = candidates.map(c => c.player);
@@ -323,68 +546,71 @@ function App() {
     return pairs;
   };
 
-  // --- 各ホールのラスベガス獲得P計算（上位過半数スライド＆同点山分け） ---
+  // --- 各ホールのラスベガス獲得P計算 ---
   const calculateVegasPointsForHole = (holeNum) => {
     const pairs = getHolePairs(holeNum);
     const pairCount = pairs.length;
     const payoutTable = VEGAS_PAYOUT_TABLE[pairCount] || [3, 2, 1];
 
-    // 各ペアのチーム数字を算出 (例: 4打と5打 ➔ 45)
+    // 各ペアの両名がスコア完了しているか判定
     const evaluatedPairs = pairs.map((pair, idx) => {
       const d1 = getPlayerScoreData(holeNum, pair.p1);
       const d2 = getPlayerScoreData(holeNum, pair.p2);
-      const minNet = Math.min(d1.net, d2.net);
-      const maxNet = Math.max(d1.net, d2.net);
-      const teamScore = minNet * 10 + maxNet;
-      return { ...pair, teamScore, idx };
+      const isBothCompleted = d1.isCompleted && d2.isCompleted;
+
+      let teamScore = null;
+      if (isBothCompleted) {
+        teamScore = Math.min(d1.net, d2.net) * 10 + Math.max(d1.net, d2.net);
+      }
+
+      return { ...pair, teamScore, isBothCompleted, idx, d1, d2 };
     });
 
-    // チーム数字の昇順でソート
-    evaluatedPairs.sort((a, b) => a.teamScore - b.teamScore);
+    const isAllPairsCompleted = evaluatedPairs.length > 0 && evaluatedPairs.every(p => p.isBothCompleted);
 
-    // 同点山分け配当ロジック
     const teamPoints = {};
-    let currentIndex = 0;
-    while (currentIndex < evaluatedPairs.length) {
-      let sameCount = 1;
-      while (
-        currentIndex + sameCount < evaluatedPairs.length &&
-        evaluatedPairs[currentIndex + sameCount].teamScore === evaluatedPairs[currentIndex].teamScore
-      ) {
-        sameCount++;
-      }
-
-      let totalPForTies = 0;
-      for (let k = 0; k < sameCount; k++) {
-        const rankPos = currentIndex + k;
-        if (rankPos < payoutTable.length) {
-          totalPForTies += payoutTable[rankPos];
-        }
-      }
-
-      const splitPoint = totalPForTies / sameCount;
-      for (let k = 0; k < sameCount; k++) {
-        const team = evaluatedPairs[currentIndex + k];
-        teamPoints[team.idx] = splitPoint;
-      }
-      currentIndex += sameCount;
-    }
-
-    // プレイヤーごとのポイントマップ化（ゴースト分は喪失）
     const playerPoints = {};
     activePlayers.forEach(p => { playerPoints[p.id] = 0; });
 
-    pairs.forEach((pair, idx) => {
-      const awarded = teamPoints[idx] || 0;
-      if (!pair.p1.isGhost) playerPoints[pair.p1.id] = awarded;
-      if (!pair.p2.isGhost) playerPoints[pair.p2.id] = awarded;
-      // ゴースト自身は 0P
-    });
+    if (isAllPairsCompleted) {
+      const sorted = [...evaluatedPairs].sort((a, b) => a.teamScore - b.teamScore);
+      let currentIndex = 0;
+      while (currentIndex < sorted.length) {
+        let sameCount = 1;
+        while (
+          currentIndex + sameCount < sorted.length &&
+          sorted[currentIndex + sameCount].teamScore === sorted[currentIndex].teamScore
+        ) {
+          sameCount++;
+        }
 
-    return { evaluatedPairs, teamPoints, playerPoints };
+        let totalPForTies = 0;
+        for (let k = 0; k < sameCount; k++) {
+          const rankPos = currentIndex + k;
+          if (rankPos < payoutTable.length) {
+            totalPForTies += payoutTable[rankPos];
+          }
+        }
+
+        const splitPoint = totalPForTies / sameCount;
+        for (let k = 0; k < sameCount; k++) {
+          const team = sorted[currentIndex + k];
+          teamPoints[team.idx] = splitPoint;
+        }
+        currentIndex += sameCount;
+      }
+
+      pairs.forEach((pair, idx) => {
+        const awarded = teamPoints[idx] || 0;
+        if (!pair.p1.isGhost) playerPoints[pair.p1.id] = awarded;
+        if (!pair.p2.isGhost) playerPoints[pair.p2.id] = awarded;
+      });
+    }
+
+    return { evaluatedPairs, teamPoints, playerPoints, isAllPairsCompleted };
   };
 
-  // --- タイトルP（ニアピン・ドラコン）配当・持ち越し・上限ブロッカー計算 ---
+  // --- タイトルP（ニアピン・ドラコン）配当計算 ---
   const titlePointsSummary = useMemo(() => {
     const playerCumulativeTitle = {};
     const holeAwarded = {};
@@ -399,27 +625,24 @@ function App() {
 
       const isNearpin = hConfig.titleType === 'NEARPIN';
       let currentPot = isNearpin ? nearpinCarry : draconCarry;
-      currentPot = Math.min(20, currentPot); // 上限20P
+      currentPot = Math.min(20, currentPot);
 
       const winnerId = titleWinners[h];
       holeAwarded[h] = { pot: currentPot, winnerId, awardedPoint: 0, isBlocked: false };
 
       if (!winnerId || winnerId === 'NONE') {
-        // 持ち越し (最大20P)
         if (isNearpin) nearpinCarry = Math.min(20, currentPot + 10);
         else draconCarry = Math.min(20, currentPot + 10);
       } else {
-        // 獲得者がいる場合
         const currentTotal = playerCumulativeTitle[winnerId] || 0;
         const availableCap = Math.max(0, 20 - currentTotal);
         const actualAward = Math.min(currentPot, availableCap);
 
         holeAwarded[h].awardedPoint = actualAward;
-        holeAwarded[h].isBlocked = actualAward === 0; // 完全ブロッカー発動
+        holeAwarded[h].isBlocked = actualAward === 0;
 
         playerCumulativeTitle[winnerId] = currentTotal + actualAward;
 
-        // 獲得者が出たため持ち越しリセット (次回10P)
         if (isNearpin) nearpinCarry = 10;
         else draconCarry = 10;
       }
@@ -428,9 +651,8 @@ function App() {
     return { playerCumulativeTitle, holeAwarded };
   }, [titleWinners, activePlayers]);
 
-  // --- 総合リーダーボード集計 ---
-  const leaderboardData = useMemo(() => {
-    // 全ホールのベガスP集計
+  // --- 全ホールのラスベガスP累計 ---
+  const totalVegasPMap = useMemo(() => {
     const totalVegasP = {};
     activePlayers.forEach(p => { totalVegasP[p.id] = 0; });
     for (let h = 1; h <= 18; h++) {
@@ -439,11 +661,15 @@ function App() {
         totalVegasP[p.id] += v.playerPoints[p.id] || 0;
       });
     }
+    return totalVegasP;
+  }, [activePlayers, scores, h1RandomOrder]);
 
-    return activePlayers.map(p => {
+  // --- 総合リーダーボード集計 ---
+  const leaderboardData = useMemo(() => {
+    const list = activePlayers.map(p => {
       const cum = calculateAccumulatedStats(18, p);
       const titleP = titlePointsSummary.playerCumulativeTitle[p.id] || 0;
-      const vegasP = totalVegasP[p.id] || 0;
+      const vegasP = totalVegasPMap[p.id] || 0;
       const finalP = cum.cumTotalP + vegasP + titleP;
 
       return {
@@ -451,34 +677,45 @@ function App() {
         gross: cum.cumGross,
         net: cum.cumNet,
         holeTotalP: cum.cumTotalP,
+        bonusCount: cum.cumBonusCount,
+        penCount: cum.cumPenCount,
         vegasP,
         titleP,
-        finalP
+        finalP,
+        stats: cum
       };
-    }).sort((a, b) => {
+    });
+
+    list.sort((a, b) => {
       if (a.player.isGhost) return 1;
       if (b.player.isGhost) return -1;
-      if (b.finalP !== a.finalP) return b.finalP - a.finalP;
-      return a.net - b.net;
+      let diff = 0;
+      if (sortField === 'name') diff = a.player.name.localeCompare(b.player.name);
+      else if (sortField === 'finalP') diff = a.finalP - b.finalP;
+      else if (sortField === 'net') diff = a.net - b.net;
+      else if (sortField === 'gross') diff = a.gross - b.gross;
+      else if (sortField === 'bonus') diff = a.bonusCount - b.bonusCount;
+      else if (sortField === 'pen') diff = a.penCount - b.penCount;
+      return sortAsc ? diff : -diff;
     });
-  }, [activePlayers, scores, titleWinners, titlePointsSummary]);
 
-  // --- 入力値の更新ヘルパー ---
+    return list;
+  }, [activePlayers, scores, titleWinners, titlePointsSummary, totalVegasPMap, sortField, sortAsc]);
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(false);
+    }
+  };
+
+  // スコア更新（独立トグル仕様：勝手な連動反転を完全排除）
   const updateHoleScore = (playerId, field, value) => {
     setScores(prev => {
       const hObj = { ...(prev[currentHole] || {}) };
       const pObj = { ...(hObj[playerId] || {}) };
-
-      // サオイチ連動: ONならワンパットも自動ON
-      if (field === 'saoIchi' && value === true) {
-        pObj.onePat = true;
-      }
-      // 砂イチ連動: ONならバンカーとワンパットも自動ON
-      if (field === 'sunaIchi' && value === true) {
-        pObj.bunker = true;
-        pObj.onePat = true;
-      }
-
       pObj[field] = value;
       hObj[playerId] = pObj;
       return { ...prev, [currentHole]: hObj };
@@ -490,633 +727,1156 @@ function App() {
     updateHoleScore(playerId, 'isCompleted', !currentStatus);
   };
 
-  // --- ホール移動ガード（タイトル未選択チェック） ---
+  // ホール変更（画面ロック完全撤廃・トースト通知のみ）
   const handleHoleChange = (nextHole) => {
     const currentHoleConfig = HOLE_CONFIG[currentHole - 1];
     if (currentHoleConfig.titleType) {
       const winner = titleWinners[currentHole];
       if (!winner) {
-        showToast(`⚠️ Hole ${currentHole}の${currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者を選択してください（なしの場合は「該当なし」を選択）`);
-        return;
+        showToast(`⚠️ Hole ${currentHole}の${currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者が未入力です`);
       }
     }
     setCurrentHole(nextHole);
   };
 
-  const currentHoleConfig = HOLE_CONFIG[currentHole - 1];
-  const prevHoleAllDone = isPrevHoleAllCompleted(currentHole);
-  const currentPairs = getHolePairs(currentHole);
-  const vegasResults = calculateVegasPointsForHole(currentHole);
+  const getPlayerShareUrl = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'player');
+    return url.toString();
+  };
 
+  const copyShareUrl = () => {
+    const url = getPlayerShareUrl();
+    const textArea = document.createElement("textarea");
+    textArea.value = url;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast("📋 参加者用URLをコピーしました！");
+    } catch (err) {
+      showToast("コピーに失敗しました。手動でコピーしてください。");
+    }
+    document.body.removeChild(textArea);
+  };
+
+  const currentHoleConfig = HOLE_CONFIG[currentHole - 1];
+
+  // =========================================================================
+  // VIEW 1: 幹事専用ダッシュボード
+  // =========================================================================
+  if (viewMode === 'admin') {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-white border-x border-slate-200 shadow-sm flex flex-col pb-12">
+        {toastMessage && (
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-xs px-4 py-2.5 rounded-full shadow-lg font-bold flex items-center space-x-1">
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        <header className="bg-emerald-600 text-white px-4 py-3.5 flex items-center justify-between shadow-xs">
+          <div>
+            <h1 className="text-base font-bold flex items-center gap-1.5">
+              <span>⛳️</span>
+              <span>ゴルフコンペ 幹事ダッシュボード</span>
+            </h1>
+            <p className="text-[11px] text-emerald-100 mt-0.5">人数設定・個別HDCP・LINE共有</p>
+          </div>
+          <button
+            onClick={() => setViewMode('player')}
+            className="text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-lg border border-emerald-500 transition shadow-xs"
+          >
+            入力画面へ ➔
+          </button>
+        </header>
+
+        <main className="flex-1 p-4 space-y-4">
+          {/* 人数設定 (4〜20名・奇数時ゴースト自動補完) */}
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-emerald-950 block">参加人数（4〜20名）</span>
+                <span className="text-[11px] text-slate-500">奇数設定時は自動で偶数ペア化</span>
+              </div>
+              <div className="flex items-center space-x-3 bg-white px-2.5 py-1 rounded-lg border border-emerald-300">
+                <button
+                  onClick={() => setPlayerCount(c => Math.max(4, c - 1))}
+                  className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded flex items-center justify-center text-sm"
+                >
+                  -
+                </button>
+                <span className="text-base font-black text-emerald-700 w-8 text-center">{playerCount}名</span>
+                <button
+                  onClick={() => setPlayerCount(c => Math.min(20, c + 1))}
+                  className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded flex items-center justify-center text-sm"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {playerCount % 2 !== 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-2 text-[11px] text-amber-900 flex items-start gap-1.5 mt-1">
+                <span>👻</span>
+                <span><b>奇数（{playerCount}名）</b>のため、末尾に「ゴースト（全ホールボギー固定・入力不要）」が自動補完され、計{playerCount + 1}名（{Math.ceil(playerCount / 2)}ペア）でラスベガスが進行します。</span>
+              </div>
+            )}
+          </div>
+
+          {/* LINE共有ボタン */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-2.5">
+            <h2 className="text-xs font-bold text-slate-700 flex items-center gap-1">
+              <span>📲</span>
+              <span>プレイヤー用 URL共有 & 開始</span>
+            </h2>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setShowShareModal(true)}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1 shadow-xs transition"
+              >
+                <span>💬</span>
+                <span>LINEでURLを送る</span>
+              </button>
+              <button
+                onClick={() => setViewMode('player')}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1 shadow-xs transition"
+              >
+                <span>🏌️‍♂️</span>
+                <span>プレイヤー画面を開く</span>
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 text-center">※LINEで送ったURLを開くと、プレイヤーは直接スコア入力画面に入れます。</p>
+          </div>
+
+          {/* プレイヤー一覧・ハンディ設定 */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                プレイヤー設定 ({playerCount}名)
+              </h2>
+              <span className="text-[10px] text-slate-400">大会途中でも即座に変更再計算</span>
+            </div>
+
+            {players.slice(0, playerCount).map((p, idx) => (
+              <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 w-12">枠 {idx + 1}</span>
+                  <input
+                    type="text"
+                    value={p.name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, name: val } : item));
+                    }}
+                    className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-800 text-xs flex-1 max-w-[200px] font-semibold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-100">
+                  <div>
+                    <label className="text-slate-500 block mb-0.5 text-[10px] font-medium">適用ホール</label>
+                    <select
+                      value={p.hdcpScope}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpScope: val } : item));
+                      }}
+                      className="bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-slate-800 w-full text-xs"
+                    >
+                      <option value="NONE">なし (0)</option>
+                      <option value="ALL">全ホール (18H)</option>
+                      <option value="PAR4_5">Par4/5のみ (14H)</option>
+                      <option value="PAR4">Par4のみ (10H)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-slate-500 block mb-0.5 text-[10px] font-medium">HDCP打数 (+1〜-3)</label>
+                    <select
+                      value={p.hdcpVal}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpVal: val } : item));
+                      }}
+                      className="bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-slate-800 w-full text-xs font-semibold"
+                    >
+                      <option value={1}>+1 (ペナルティ加算)</option>
+                      <option value={0}>0 (増減なし)</option>
+                      <option value={-1}>-1 (1打引き)</option>
+                      <option value={-2}>-2 (2打引き)</option>
+                      <option value={-3}>-3 (3打引き)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+
+        {/* LINE URL共有モーダル */}
+        {showShareModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>📲</span>
+                  <span>プレイヤー用リンク共有</span>
+                </h3>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600">
+                LINEで送るか、URLをコピーして参加者に配布してください。参加者は開いた瞬間からスコア入力を行えます。
+              </p>
+
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-[11px] text-slate-600 break-all select-all font-mono">
+                {getPlayerShareUrl()}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={copyShareUrl}
+                  className="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2 rounded-lg text-xs"
+                >
+                  📋 URLをコピー
+                </button>
+                <a
+                  href={`https://line.me/R/msg/text/?${encodeURIComponent('⛳️ 本日のゴルフコンペ スコア入力はこちらから\n' + getPlayerShareUrl())}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-2 rounded-lg text-xs flex items-center justify-center gap-1"
+                >
+                  <span>💬</span>
+                  <span>LINEで送る</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // VIEW 2: プレイヤー画面
+  // =========================================================================
   return (
-    <div className="max-w-md mx-auto min-h-screen flex flex-col bg-slate-900 border-x border-slate-800 shadow-2xl relative pb-20">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-100 text-slate-900 border-x border-slate-200 shadow-sm flex flex-col pb-8 relative">
       
       {/* トースト表示 */}
       {toastMessage && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-rose-600/95 backdrop-blur text-white text-xs px-4 py-2.5 rounded-full shadow-2xl border border-rose-400 font-bold animate-bounce flex items-center space-x-1">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-xs px-4 py-2.5 rounded-full shadow-lg font-bold flex items-center space-x-1">
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* --- ヘッダーバー --- */}
-      <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+      {/* --- 最上部 ヘッダー --- */}
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-3.5 py-2.5 flex items-center justify-between shadow-xs">
         <div>
-          <h1 className="text-base font-black tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <span>⛳️ GOLF VEGAS MASTER</span>
+          <h1 className="text-sm font-black tracking-wide text-emerald-700 flex items-center gap-1">
+            <span>⛳️ ゴルフコンペ</span>
           </h1>
-          <p className="text-[10px] text-slate-400">
-            参加: <span className="text-emerald-300 font-bold">{playerCount}名</span>
-            {playerCount % 2 !== 0 && <span className="text-amber-400 ml-1">(+👻ゴースト)</span>}
-            <span className="mx-1.5">|</span>
-            ペア: <span className="text-cyan-300 font-bold">{Math.ceil(playerCount / 2)}組</span>
+          <p className="text-[10px] text-slate-500">
+            {playerCount}名{playerCount % 2 !== 0 && ' (+👻ゴースト)'} / {Math.ceil(activePlayers.length / 2)}ペア
           </p>
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5">
           <button
             onClick={() => setShowRuleModal(true)}
-            className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition"
+            className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-bold transition"
           >
             <span>📖</span>
-            <span className="font-semibold">ルール</span>
+            <span>ルール</span>
           </button>
           <button
-            onClick={() => setShowConfigModal(true)}
-            className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2.5 py-1.5 rounded-lg transition"
+            onClick={() => setViewMode('admin')}
+            className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-lg font-bold transition"
           >
             ⚙️ 幹事設定
           </button>
         </div>
       </header>
 
-      {/* --- ホールセレクター (横スクロール) --- */}
-      <div className="bg-slate-950 border-b border-slate-800 px-2 py-2 overflow-x-auto no-scrollbar flex space-x-1.5">
-        {HOLE_CONFIG.map(h => {
-          const isSelected = h.hole === currentHole;
-          const hasTitle = h.titleType !== null;
-          return (
-            <button
-              key={h.hole}
-              onClick={() => handleHoleChange(h.hole)}
-              className={`flex-shrink-0 w-11 h-12 rounded-lg flex flex-col items-center justify-center transition border ${
-                isSelected
-                  ? 'bg-emerald-500 border-emerald-400 text-slate-950 font-black shadow-lg shadow-emerald-500/30'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              <span className="text-[11px] leading-none font-bold">H{h.hole}</span>
-              <span className="text-[9px] mt-0.5 opacity-80">P{h.par}</span>
-              {hasTitle && (
-                <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${h.titleType === 'NEARPIN' ? 'bg-amber-400' : 'bg-cyan-400'}`}></span>
-              )}
-            </button>
-          );
-        })}
+      {/* --- 最上部 2大メインタブ --- */}
+      <div className="bg-white border-b border-slate-200 px-3 py-2 grid grid-cols-2 gap-2 shadow-xs">
+        <button
+          onClick={() => setMainTab('input')}
+          className={`py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition ${
+            mainTab === 'input'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          <span>📝</span>
+          <span>スコア入力</span>
+        </button>
+        <button
+          onClick={() => setMainTab('rankings')}
+          className={`py-2 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition ${
+            mainTab === 'rankings'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          <span>🏆</span>
+          <span>順位確認</span>
+        </button>
       </div>
 
-      {/* --- メインコンテンツ領域 --- */}
-      {activeTab === 'input' ? (
-        <main className="flex-1 p-3 space-y-4">
-          
-          {/* 現在ホールの概要バナー */}
-          <section className="bg-slate-800/80 backdrop-blur rounded-xl p-3 border border-slate-700/80 flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black text-white">HOLE {currentHole}</span>
-                <span className="text-xs font-bold bg-slate-700 px-2 py-0.5 rounded text-emerald-400 border border-slate-600">
-                  Par {currentHoleConfig.par}
-                </span>
-                {currentHoleConfig.titleType && (
-                  <span className={`text-[10px] font-black px-2 py-0.5 rounded ${
-                    currentHoleConfig.titleType === 'NEARPIN' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                  }`}>
-                    {currentHoleConfig.titleType === 'NEARPIN' ? '🎯 ニアピン' : '🚀 ドラコン'}
-                  </span>
-                )}
-              </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                {currentHole > 1 && !prevHoleAllDone
-                  ? '⚠️ 前ホールの入力が未完了のためペアは未確定です'
-                  : `たすき掛けペア: ${Math.ceil(activePlayers.length / 2)}組編成完了`}
-              </p>
-            </div>
-            {currentHoleConfig.titleType && (
-              <div className="text-right">
-                <span className="text-[10px] text-amber-400 block font-semibold">キャリーオーバー</span>
-                <span className="text-sm font-black text-amber-300">
-                  +{titlePointsSummary.holeAwarded[currentHole]?.pot || 10}P
-                </span>
-              </div>
-            )}
-          </section>
-
-          {/* タイトルP（ニアピン・ドラコン）獲得者セレクター */}
-          {currentHoleConfig.titleType && (
-            <section className="bg-amber-950/30 border border-amber-600/40 rounded-xl p-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
-                  <span>🏆</span>
-                  <span>{currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者選択</span>
-                </span>
-                <span className="text-[10px] text-amber-400/80">※大会累計20P上限</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={titleWinners[currentHole] || ''}
-                  onChange={(e) => setTitleWinners(prev => ({ ...prev, [currentHole]: e.target.value }))}
-                  className="bg-slate-900 border border-amber-500/50 rounded-lg text-xs px-2.5 py-2 text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
-                >
-                  <option value="">⚠️ 獲得者を選択...</option>
-                  <option value="NONE">❌ 該当なし（次へ持ち越し）</option>
-                  {activePlayers.filter(p => !p.isGhost).map(p => {
-                    const currentPts = titlePointsSummary.playerCumulativeTitle[p.id] || 0;
-                    const isMax = currentPts >= 20;
-                    return (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (現在:{currentPts}P{isMax ? ' - 🛑上限到達' : ''})
-                      </option>
-                    );
-                  })}
-                </select>
-                <div className="text-[11px] bg-slate-900/80 rounded-lg p-2 border border-slate-700/80 flex items-center justify-center text-center">
-                  {titleWinners[currentHole] === 'NONE' ? (
-                    <span className="text-amber-400 font-bold">次回へ +10P 持ち越し</span>
-                  ) : titleWinners[currentHole] ? (
-                    (() => {
-                      const wId = titleWinners[currentHole];
-                      const wInfo = titlePointsSummary.holeAwarded[currentHole];
-                      if (wInfo?.isBlocked) {
-                        return <span className="text-rose-400 font-bold">🛑 累計上限20Pのため+0P (完全ブロック消滅)</span>;
-                      }
-                      return <span className="text-emerald-400 font-bold">🎉 +{wInfo?.awardedPoint}P 獲得確定！</span>;
-                    })()
-                  ) : (
-                    <span className="text-slate-400">未選択</span>
-                  )}
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* ラスベガス ペアリング状況カード */}
-          <section className="bg-slate-950 rounded-xl p-3 border border-slate-800">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-black text-cyan-400 flex items-center gap-1">
-                <span>🎰</span>
-                <span>ラスベガス ペア & 状況</span>
-              </span>
-              <span className="text-[10px] text-slate-400">
-                {currentHole === 1 ? '1H: 完全ランダム' : '前H成績たすき掛け'}
-              </span>
-            </div>
-
-            {currentHole > 1 && !prevHoleAllDone ? (
-              <div className="bg-rose-950/20 border border-rose-800/40 rounded-lg p-3 text-center">
-                <p className="text-xs font-bold text-rose-300">⚠️ チーム未確定（前H全員完了待ち）</p>
-                <p className="text-[10px] text-slate-400 mt-1">談合・ネタバレ防止のため、前ホールの全員入力完了まで非公開です。</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {currentPairs.map((pair, idx) => {
-                  const d1 = getPlayerScoreData(currentHole, pair.p1);
-                  const d2 = getPlayerScoreData(currentHole, pair.p2);
-                  const tScore = Math.min(d1.net, d2.net) * 10 + Math.max(d1.net, d2.net);
-                  const awarded = vegasResults.teamPoints[idx] || 0;
-
+      {/* ========================================================================= */}
+      {/* メインタブ 1: スコア入力画面 */}
+      {/* ========================================================================= */}
+      {mainTab === 'input' && (
+        <div className="flex-1 flex flex-col">
+          {/* ホールセレクター: 横スクロール完全廃止・OUT(1〜9H)/IN(10〜18H)の2段グリッド配置 */}
+          <div className="bg-white border-b border-slate-200 p-2 space-y-1 shadow-xs">
+            {/* 上段: OUT (1〜9H) */}
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-black text-slate-400 w-7 text-center">OUT</span>
+              <div className="grid grid-cols-9 gap-1 flex-1">
+                {HOLE_CONFIG.slice(0, 9).map(h => {
+                  const isSelected = h.hole === currentHole;
+                  const hasTitle = h.titleType !== null;
                   return (
-                    <div key={idx} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] font-black text-slate-500 uppercase">Team {idx + 1}</span>
-                        <div className="text-xs font-bold text-slate-200 mt-0.5">
-                          <span>{pair.p1.name}</span>
-                          <span className="text-slate-500 mx-1">&</span>
-                          <span>{pair.p2.name}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-base font-black text-cyan-300 tracking-wider">
-                          {tScore}組
-                        </span>
-                        {awarded > 0 && (
-                          <span className="block text-[10px] font-bold text-emerald-400">
-                            +{awarded}P
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    <button
+                      key={h.hole}
+                      onClick={() => handleHoleChange(h.hole)}
+                      className={`h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                        isSelected
+                          ? 'bg-emerald-600 border-emerald-700 text-white font-bold shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-[11px] leading-tight font-black">{h.hole}</span>
+                      <span className={`text-[9px] mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>P{h.par}</span>
+                      {hasTitle && (
+                        <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${h.titleType === 'NEARPIN' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
+                      )}
+                    </button>
                   );
                 })}
               </div>
-            )}
-          </section>
+            </div>
 
-          {/* 各プレイヤー スコア＆役入力カードリスト */}
-          <section className="space-y-3">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-wider px-1">
-              プレイヤー入力 ({activePlayers.length}名)
-            </h2>
-
-            {activePlayers.map((player) => {
-              const data = getPlayerScoreData(currentHole, player);
-              const pts = calculateHolePoints(currentHole, player);
-              const prevCompleted = currentHole === 1 || scores[currentHole - 1]?.[player.id]?.isCompleted;
-              const isLocked = !prevCompleted && !player.isGhost;
-
-              return (
-                <div
-                  key={player.id}
-                  className={`rounded-xl border transition-all ${
-                    player.isGhost
-                      ? 'bg-slate-950/50 border-slate-800/50 opacity-70'
-                      : data.isCompleted
-                      ? 'bg-slate-850 border-emerald-500/40 shadow-lg shadow-emerald-950/20'
-                      : 'bg-slate-850 border-slate-800'
-                  } ${isLocked ? 'opacity-50 pointer-events-none' : ''}`}
-                >
-                  <div className="p-3">
-                    {/* カード上部: 名前・ネット計算・確定トグル */}
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-black text-white">{player.name}</span>
-                          {player.isGhost ? (
-                            <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">全Hボギー固定</span>
-                          ) : player.hdcpVal !== 0 && (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${player.hdcpVal < 0 ? 'bg-cyan-950 text-cyan-300 border border-cyan-800' : 'bg-rose-950 text-rose-300'}`}>
-                              HDCP {player.hdcpVal > 0 ? `+${player.hdcpVal}` : player.hdcpVal}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          グロス: <span className="font-bold text-slate-200">{data.gross}</span> ➔ 
-                          ネット: <span className="font-bold text-emerald-400 text-xs">{data.net}</span>
-                          <span className="mx-1">|</span>
-                          Par比: <span className="font-bold">{data.net - currentHoleConfig.par >= 0 ? `+${data.net - currentHoleConfig.par}` : data.net - currentHoleConfig.par}</span>
-                        </div>
-                      </div>
-
-                      {/* 完了ボタン */}
-                      {!player.isGhost && (
-                        <button
-                          onClick={() => toggleScoreCompletion(player.id)}
-                          className={`text-xs px-3 py-1.5 rounded-lg font-black transition flex items-center gap-1 ${
-                            data.isCompleted
-                              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-700/40'
-                              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                          }`}
-                        >
-                          <span>{data.isCompleted ? '✓ 完了' : '未完了'}</span>
-                        </button>
+            {/* 下段: IN (10〜18H) */}
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-black text-slate-400 w-7 text-center">IN</span>
+              <div className="grid grid-cols-9 gap-1 flex-1">
+                {HOLE_CONFIG.slice(9, 18).map(h => {
+                  const isSelected = h.hole === currentHole;
+                  const hasTitle = h.titleType !== null;
+                  return (
+                    <button
+                      key={h.hole}
+                      onClick={() => handleHoleChange(h.hole)}
+                      className={`h-11 rounded-lg flex flex-col items-center justify-center transition border ${
+                        isSelected
+                          ? 'bg-emerald-600 border-emerald-700 text-white font-bold shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-[11px] leading-tight font-black">{h.hole}</span>
+                      <span className={`text-[9px] mt-0.5 ${isSelected ? 'text-emerald-100' : 'text-slate-400'}`}>P{h.par}</span>
+                      {hasTitle && (
+                        <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${h.titleType === 'NEARPIN' ? 'bg-amber-400' : 'bg-blue-400'}`}></span>
                       )}
-                    </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
-                    {/* カード中央: 打数ステッパー (グロス入力) */}
-                    {!player.isGhost && (
-                      <div className="py-2.5 flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400">グロス打数</span>
-                        <div className="flex items-center space-x-3">
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'gross', Math.max(1, data.gross - 1))}
-                            className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-lg font-black flex items-center justify-center border border-slate-700 active:scale-95 transition"
-                          >
-                            -
-                          </button>
-                          <span className="text-xl font-black text-white w-7 text-center">{data.gross}</span>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'gross', data.gross + 1)}
-                            className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-lg font-black flex items-center justify-center border border-slate-700 active:scale-95 transition"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
+          <main className="p-3 space-y-3">
+            {/* ホール基本情報（チーム・ペアに関するテキスト注記は一切なし） */}
+            <section className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-black text-slate-900">HOLE {currentHole}</span>
+                  <span className="text-xs font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-300">
+                    Par {currentHoleConfig.par}
+                  </span>
+                  {currentHoleConfig.titleType && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      currentHoleConfig.titleType === 'NEARPIN' ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-blue-100 text-blue-800 border border-blue-300'
+                    }`}>
+                      {currentHoleConfig.titleType === 'NEARPIN' ? '🎯 ニアピン' : '🚀 ドラコン'}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {currentHoleConfig.titleType && (
+                <div className="text-right">
+                  <span className="text-[10px] text-amber-700 block font-semibold">キャリー配当</span>
+                  <span className="text-sm font-black text-amber-600">
+                    +{titlePointsSummary.holeAwarded[currentHole]?.pot || 10}P
+                  </span>
+                </div>
+              )}
+            </section>
+
+            {/* タイトルP獲得者セレクター */}
+            {currentHoleConfig.titleType && (
+              <section className="bg-amber-50/70 border border-amber-300 rounded-xl p-3 shadow-xs">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                    <span>🏆</span>
+                    <span>{currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者選択</span>
+                  </span>
+                  <span className="text-[10px] text-amber-700">※大会累計20P上限</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={titleWinners[currentHole] || ''}
+                    onChange={(e) => setTitleWinners(prev => ({ ...prev, [currentHole]: e.target.value }))}
+                    className="bg-white border border-amber-400 rounded-lg text-xs px-2 py-1.5 text-slate-800 focus:outline-none"
+                  >
+                    <option value="">⚠️ 獲得者を選択...</option>
+                    <option value="NONE">❌ 該当なし（次へ持ち越し）</option>
+                    {activePlayers.filter(p => !p.isGhost).map(p => {
+                      const currentPts = titlePointsSummary.playerCumulativeTitle[p.id] || 0;
+                      const isMax = currentPts >= 20;
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name} (累計:{currentPts}P{isMax ? ' - 上限到達' : ''})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <div className="text-[11px] bg-white rounded-lg p-1.5 border border-amber-200 flex items-center justify-center text-center font-bold">
+                    {titleWinners[currentHole] === 'NONE' ? (
+                      <span className="text-amber-700">次回へ +10P 持ち越し</span>
+                    ) : titleWinners[currentHole] ? (
+                      (() => {
+                        const wInfo = titlePointsSummary.holeAwarded[currentHole];
+                        if (wInfo?.isBlocked) {
+                          return <span className="text-red-600">🛑 上限20P到達のため+0P (消滅)</span>;
+                        }
+                        return <span className="text-emerald-700">🎉 +{wInfo?.awardedPoint}P 獲得確定！</span>;
+                      })()
+                    ) : (
+                      <span className="text-slate-400 font-normal">未選択</span>
                     )}
+                  </div>
+                </div>
+              </section>
+            )}
 
-                    {/* カード下部: 小技・ペナルティ トグルボタン */}
-                    {!player.isGhost && (
-                      <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
-                        {/* 小技 (+P) */}
-                        <div className="grid grid-cols-4 gap-1.5">
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'chipIn', !data.chipIn)}
-                            className={`py-1.5 text-[11px] font-bold rounded border transition ${
-                              data.chipIn
-                                ? 'bg-amber-500 border-amber-400 text-slate-950 font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            チップ +2
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'onePat', !data.onePat)}
-                            className={`py-1.5 text-[11px] font-bold rounded border transition ${
-                              data.onePat
-                                ? 'bg-emerald-600 border-emerald-400 text-white font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            1パット +1
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'saoIchi', !data.saoIchi)}
-                            className={`py-1.5 text-[11px] font-bold rounded border transition ${
-                              data.saoIchi
-                                ? 'bg-emerald-500 border-emerald-300 text-slate-950 font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            サオイチ +2
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'sunaIchi', !data.sunaIchi)}
-                            className={`py-1.5 text-[11px] font-bold rounded border transition ${
-                              data.sunaIchi
-                                ? 'bg-amber-400 border-amber-300 text-slate-950 font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            砂イチ +1
-                          </button>
-                        </div>
+            {/* プレイヤー入力カードリスト */}
+            <section className="space-y-2.5">
+              <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wide px-1">
+                スコア・役入力 ({activePlayers.length}名)
+              </h2>
 
-                        {/* ペナルティ (-1P) */}
-                        <div className="grid grid-cols-4 gap-1.5">
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'ob', !data.ob)}
-                            className={`py-1 text-[10px] font-bold rounded border transition ${
-                              data.ob
-                                ? 'bg-rose-600 border-rose-400 text-white font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-500'
-                            }`}
-                          >
-                            OB -1
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'water', !data.water)}
-                            className={`py-1 text-[10px] font-bold rounded border transition ${
-                              data.water
-                                ? 'bg-cyan-600 border-cyan-400 text-white font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-500'
-                            }`}
-                          >
-                            池 -1
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'bunker', !data.bunker)}
-                            className={`py-1 text-[10px] font-bold rounded border transition ${
-                              data.bunker
-                                ? 'bg-yellow-600 border-yellow-400 text-white font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-500'
-                            }`}
-                          >
-                            バンカー -1
-                          </button>
-                          <button
-                            onClick={() => updateHoleScore(player.id, 'threePat', !data.threePat)}
-                            className={`py-1 text-[10px] font-bold rounded border transition ${
-                              data.threePat
-                                ? 'bg-purple-600 border-purple-400 text-white font-black'
-                                : 'bg-slate-900 border-slate-800 text-slate-500'
-                            }`}
-                          >
-                            3パット -1
-                          </button>
-                        </div>
+              {activePlayers.map((player) => {
+                const data = getPlayerScoreData(currentHole, player);
+                const pts = calculateHolePoints(currentHole, player);
+                const prevCompleted = currentHole === 1 || scores[currentHole - 1]?.[player.id]?.isCompleted;
+                const isLocked = !prevCompleted && !player.isGhost;
+                const isDone = data.isCompleted;
 
-                        {/* 自動ボーナス通知タグ (表示のみ) */}
-                        {pts.autoBonusP > 0 && (
-                          <div className="flex items-center gap-1.5 pt-1 text-[10px] text-emerald-400 font-bold">
-                            <span>✨ 自動ボーナス:</span>
-                            {currentHole > 1 && (getPlayerScoreData(currentHole - 1, player).gross - HOLE_CONFIG[currentHole - 2].par >= 2) && (data.gross - currentHoleConfig.par < getPlayerScoreData(currentHole - 1, player).gross - HOLE_CONFIG[currentHole - 2].par) && (
-                              <span className="bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">バウンスバック (+1P)</span>
+                return (
+                  <div
+                    key={player.id}
+                    className={`rounded-xl border transition shadow-xs ${
+                      player.isGhost
+                        ? 'bg-slate-50 border-slate-300 opacity-75'
+                        : isDone
+                        ? 'bg-slate-100 border-slate-300'
+                        : 'bg-white border-slate-200'
+                    } ${isLocked ? 'opacity-50 pointer-events-none' : ''}`}
+                  >
+                    <div className="p-3">
+                      {/* 上段：名前、打数サマリー、確定/修正ボタン */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-sm font-bold ${isDone ? 'text-slate-600' : 'text-slate-900'}`}>{player.name}</span>
+                            {player.isGhost ? (
+                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-bold">全Hボギー固定</span>
+                            ) : player.hdcpVal !== 0 && (
+                              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${player.hdcpVal < 0 ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                HDCP {player.hdcpVal > 0 ? `+${player.hdcpVal}` : player.hdcpVal}
+                              </span>
                             )}
-                            {data.ob && data.gross === currentHoleConfig.par + 2 && (
-                              <span className="bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-800">OBパー (+1P)</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            グロス: <span className="font-bold text-slate-700">{data.gross}</span> ➔ 
+                            ネット: <span className="font-black text-emerald-700 text-xs">{data.net}</span>
+                            <span className="mx-1">|</span>
+                            Par比: <span className="font-bold">{data.net - currentHoleConfig.par >= 0 ? `+${data.net - currentHoleConfig.par}` : data.net - currentHoleConfig.par}</span>
+                          </div>
+                        </div>
+
+                        {/* 確定／修正 ボタンUI */}
+                        {!player.isGhost && (
+                          <button
+                            onClick={() => toggleScoreCompletion(player.id)}
+                            className={`text-xs px-3.5 py-1.5 rounded-lg font-black transition flex items-center gap-1 shadow-sm active:scale-95 ${
+                              isDone
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white border border-amber-600'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 ring-2 ring-emerald-200'
+                            }`}
+                          >
+                            <span>{isDone ? '✏️ 修正する' : '✓ スコアを確定する'}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 確定時はグレーアウト＆操作ロック */}
+                      <div className={isDone ? 'opacity-40 pointer-events-none select-none' : ''}>
+                        {!player.isGhost && (
+                          <div className="py-2.5 space-y-2">
+                            {/* 打数ステッパー & パット数ステッパー (初期値2, 0〜9) */}
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-200">
+                                <span className="text-xs font-bold text-slate-700">グロス打数</span>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => updateHoleScore(player.id, 'gross', Math.max(1, data.gross - 1))}
+                                    className="w-7 h-7 rounded bg-white hover:bg-slate-100 text-slate-800 text-base font-black flex items-center justify-center border border-slate-300 active:scale-95 transition"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="text-base font-black text-slate-900 w-6 text-center">{data.gross}</span>
+                                  <button
+                                    onClick={() => updateHoleScore(player.id, 'gross', data.gross + 1)}
+                                    className="w-7 h-7 rounded bg-white hover:bg-slate-100 text-slate-800 text-base font-black flex items-center justify-center border border-slate-300 active:scale-95 transition"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-200">
+                                <div>
+                                  <span className="text-xs font-bold text-slate-700 block">パット数</span>
+                                  <span className="text-[9px] text-slate-400">
+                                    {data.putts === 0 ? 'チップイン' : data.putts === 1 ? '1パット' : data.putts >= 3 ? '3パット' : '通常'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => updateHoleScore(player.id, 'putts', Math.max(0, data.putts - 1))}
+                                    className="w-7 h-7 rounded bg-white hover:bg-slate-100 text-slate-800 text-base font-black flex items-center justify-center border border-slate-300 active:scale-95 transition"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="text-base font-black text-slate-900 w-6 text-center">{data.putts}</span>
+                                  <button
+                                    onClick={() => updateHoleScore(player.id, 'putts', Math.min(9, data.putts + 1))}
+                                    className="w-7 h-7 rounded bg-white hover:bg-slate-100 text-slate-800 text-base font-black flex items-center justify-center border border-slate-300 active:scale-95 transition"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* パット数自動付与バッジ表示 */}
+                            <div className="flex items-center gap-1.5 text-[10px]">
+                              {data.putts === 0 && (
+                                <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold shadow-xs">✨ チップイン自動判定 (+2P)</span>
+                              )}
+                              {data.putts === 1 && (
+                                <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold shadow-xs">✨ 1パット自動判定 (+1P)</span>
+                              )}
+                              {data.putts >= 3 && (
+                                <span className="bg-red-600 text-white px-2 py-0.5 rounded font-bold shadow-xs">⚠️ 3パット自動判定 (-1P)</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {!player.isGhost && (
+                          <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                            {/* ボーナス（青系統で統一・独立トグル） */}
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'saoIchi', !data.saoIchi)}
+                                className={`py-1.5 text-[11px] font-bold rounded-lg border transition ${
+                                  data.saoIchi
+                                    ? 'bg-blue-600 border-blue-700 text-white shadow-xs'
+                                    : 'bg-blue-50/60 border-blue-200 text-blue-700 hover:bg-blue-100/60'
+                                }`}
+                              >
+                                サオイチ +1
+                              </button>
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'sunaIchi', !data.sunaIchi)}
+                                className={`py-1.5 text-[11px] font-bold rounded-lg border transition ${
+                                  data.sunaIchi
+                                    ? 'bg-blue-600 border-blue-700 text-white shadow-xs'
+                                    : 'bg-blue-50/60 border-blue-200 text-blue-700 hover:bg-blue-100/60'
+                                }`}
+                              >
+                                砂イチ +1
+                              </button>
+                            </div>
+
+                            {/* ペナルティ（赤系統で統一・独立トグル） */}
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'ob', !data.ob)}
+                                className={`py-1 text-[11px] font-bold rounded-lg border transition ${
+                                  data.ob
+                                    ? 'bg-red-600 border-red-700 text-white shadow-xs'
+                                    : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
+                                }`}
+                              >
+                                OB -1
+                              </button>
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'water', !data.water)}
+                                className={`py-1 text-[11px] font-bold rounded-lg border transition ${
+                                  data.water
+                                    ? 'bg-red-600 border-red-700 text-white shadow-xs'
+                                    : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
+                                }`}
+                              >
+                                池 -1
+                              </button>
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'bunker', !data.bunker)}
+                                className={`py-1 text-[11px] font-bold rounded-lg border transition ${
+                                  data.bunker
+                                    ? 'bg-red-600 border-red-700 text-white shadow-xs'
+                                    : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
+                                }`}
+                              >
+                                バンカー -1
+                              </button>
+                            </div>
+
+                            {/* 自動救済ボーナス */}
+                            {pts.autoBonusP > 0 && (
+                              <div className="flex items-center gap-1.5 pt-1 text-[10px] text-emerald-700 font-bold">
+                                <span>✨ 自動救済賞:</span>
+                                {pts.isBounceBack && (
+                                  <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">バウンスバック (+1P)</span>
+                                )}
+                                {pts.isObPar && (
+                                  <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-300">OBパー (+1P)</span>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
                       </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-        </main>
-      ) : (
-        /* --- リーダーボード画面 --- */
-        <main className="flex-1 p-3 space-y-3">
-          <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 flex items-center justify-between">
-            <span className="text-sm font-black text-white flex items-center gap-1.5">
-              <span>📊</span>
-              <span>総合リーダーボード (全18H完全加算)</span>
-            </span>
-            <span className="text-[10px] text-slate-400">Pが高い順</span>
-          </div>
-
-          <div className="space-y-2">
-            {leaderboardData.map((row, idx) => {
-              if (row.player.isGhost) return null; // ゴーストは非表示または最下位除外
-              const isTop3 = idx < 3;
-              return (
-                <div
-                  key={row.player.id}
-                  className={`rounded-xl p-3 border flex items-center justify-between ${
-                    idx === 0
-                      ? 'bg-amber-950/30 border-amber-500/60 shadow-lg shadow-amber-950/30'
-                      : idx === 1
-                      ? 'bg-slate-800 border-slate-600'
-                      : idx === 2
-                      ? 'bg-amber-900/20 border-amber-800/40'
-                      : 'bg-slate-850 border-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-xs ${
-                      idx === 0 ? 'bg-amber-400 text-slate-950' : idx === 1 ? 'bg-slate-300 text-slate-950' : idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {idx + 1}
-                    </div>
-                    <div>
-                      <span className="text-sm font-black text-white block">{row.player.name}</span>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-2">
-                        <span>Net: <b className="text-slate-200">{row.net}</b></span>
-                        <span>Gross: <b className="text-slate-200">{row.gross}</b></span>
-                      </div>
                     </div>
                   </div>
-
-                  <div className="text-right">
-                    <span className="text-xl font-black text-emerald-400">{row.finalP} <span className="text-xs">P</span></span>
-                    <div className="text-[9px] text-slate-400">
-                      内訳: スコア{row.holeTotalP} / 🎰{row.vegasP} / 🏆{row.titleP}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </main>
-      )}
-
-      {/* --- フッター ナビゲーション --- */}
-      <nav className="fixed bottom-0 max-w-md w-full bg-slate-950/95 backdrop-blur-md border-t border-slate-800 grid grid-cols-2 p-2 gap-2 z-40">
-        <button
-          onClick={() => setActiveTab('input')}
-          className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition ${
-            activeTab === 'input'
-              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-700/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white'
-          }`}
-        >
-          <span>⛳️ スコア・役入力</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('leaderboard')}
-          className={`py-2.5 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition ${
-            activeTab === 'leaderboard'
-              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-700/30'
-              : 'bg-slate-900 text-slate-400 hover:text-white'
-          }`}
-        >
-          <span>📊 リーダーボード</span>
-        </button>
-      </nav>
-
-      {/* ============================================================== */}
-      {/* --- 幹事設定モーダル (人数・個別HDCP) --- */}
-      {/* ============================================================== */}
-      {showConfigModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-              <h2 className="text-sm font-black text-white flex items-center gap-1.5">
-                <span>⚙️ 幹事専用設定</span>
-              </h2>
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 text-xs font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-3 overflow-y-auto space-y-4 text-xs">
-              {/* 人数設定 (4〜20名) */}
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
-                <span className="font-bold text-slate-300 block">参加人数の変更 (4〜20名)</span>
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-slate-400">
-                    現在の人数: <b className="text-emerald-400 text-sm">{playerCount}名</b>
-                    {playerCount % 2 !== 0 && <span className="text-amber-400 ml-1">(奇数: ゴースト自動補完)</span>}
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => setPlayerCount(c => Math.max(4, c - 1))}
-                      className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-bold"
-                    >
-                      -
-                    </button>
-                    <button
-                      onClick={() => setPlayerCount(c => Math.min(20, c + 1))}
-                      className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-bold"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* プレイヤー別ハンディ・名前設定 */}
-              <div className="space-y-2">
-                <span className="font-bold text-slate-300 block">プレイヤー設定 (名前 & 個別HDCP)</span>
-                {players.slice(0, playerCount).map((p, idx) => (
-                  <div key={p.id} className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-slate-500 font-bold">Slot {idx + 1}</span>
-                      <input
-                        type="text"
-                        value={p.name}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, name: val } : item));
-                        }}
-                        className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs w-36"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[10px]">
-                      <div>
-                        <label className="text-slate-400 block mb-0.5">適用ホール</label>
-                        <select
-                          value={p.hdcpScope}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpScope: val } : item));
-                          }}
-                          className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white w-full"
-                        >
-                          <option value="NONE">なし (0)</option>
-                          <option value="ALL">全ホール (18H)</option>
-                          <option value="PAR4_5">Par4/5のみ (14H)</option>
-                          <option value="PAR4">Par4のみ (10H)</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-slate-400 block mb-0.5">HDCP値 (+1〜-3)</label>
-                        <select
-                          value={p.hdcpVal}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpVal: val } : item));
-                          }}
-                          className="bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-white w-full"
-                        >
-                          <option value={1}>+1 (ペナルティ)</option>
-                          <option value={0}>0 (増減なし)</option>
-                          <option value={-1}>-1 (1打引き)</option>
-                          <option value={-2}>-2 (2打引き)</option>
-                          <option value={-3}>-3 (3打引き)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-950 border-t border-slate-800">
-              <button
-                onClick={() => setShowConfigModal(false)}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition"
-              >
-                設定を保存して閉じる
-              </button>
-            </div>
-          </div>
+                );
+              })}
+            </section>
+          </main>
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* --- ルール説明 モーダル (全5タブ完全版) --- */}
-      {/* ============================================================== */}
+      {/* ========================================================================= */}
+      {/* メインタブ 2: 順位確認画面 */}
+      {/* ========================================================================= */}
+      {mainTab === 'rankings' && (
+        <div className="flex-1 p-3 space-y-3">
+          
+          {/* 最上部：総合リーダーボード（タップソート機能付き） */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <span className="text-xs font-black text-slate-800">総合リーダーボード</span>
+              <span className="text-[10px] text-slate-400">列タップで並び替え</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-100/75 border-b border-slate-200 text-slate-600 font-bold select-none cursor-pointer">
+                    <th className="p-2 text-center" onClick={() => handleSort('rank')}>順位</th>
+                    <th className="p-2" onClick={() => handleSort('name')}>プレイヤー</th>
+                    <th className="p-2 text-right text-emerald-700" onClick={() => handleSort('finalP')}>獲得P ▾</th>
+                    <th className="p-2 text-right text-blue-700" onClick={() => handleSort('net')}>Net ▾</th>
+                    <th className="p-2 text-right" onClick={() => handleSort('gross')}>Gross ▾</th>
+                    <th className="p-2 text-right text-blue-600" onClick={() => handleSort('bonus')}>ボナ ▾</th>
+                    <th className="p-2 text-right text-red-600" onClick={() => handleSort('pen')}>ペナ ▾</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {leaderboardData.map((row, idx) => {
+                    if (row.player.isGhost) return null;
+                    return (
+                      <tr key={row.player.id} className="hover:bg-slate-50 transition">
+                        <td className="p-2 text-center font-bold text-slate-400">{idx + 1}</td>
+                        <td className="p-2 font-bold text-slate-800">{row.player.name}</td>
+                        <td className="p-2 text-right font-black text-emerald-700">{row.finalP}P</td>
+                        <td className="p-2 text-right font-bold text-blue-700">{row.net}</td>
+                        <td className="p-2 text-right text-slate-600">{row.gross}</td>
+                        <td className="p-2 text-right text-blue-600">{row.bonusCount}</td>
+                        <td className="p-2 text-right text-red-600">{row.penCount}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 3大詳細サブタブ切り替えバー */}
+          <div className="bg-white p-1 rounded-xl border border-slate-200 grid grid-cols-3 gap-1 shadow-xs">
+            <button
+              onClick={() => setRankingSubTab('vegas')}
+              className={`py-2 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 ${
+                rankingSubTab === 'vegas'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span>🎰</span>
+              <span>ラスベガス</span>
+            </button>
+            <button
+              onClick={() => setRankingSubTab('bonus')}
+              className={`py-2 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 ${
+                rankingSubTab === 'bonus'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span>✨</span>
+              <span>ボーナス</span>
+            </button>
+            <button
+              onClick={() => setRankingSubTab('individual')}
+              className={`py-2 rounded-lg text-xs font-black transition flex items-center justify-center gap-1 ${
+                rankingSubTab === 'individual'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span>👤</span>
+              <span>個人 (18H明細)</span>
+            </button>
+          </div>
+
+          {/* ------------------------------------------------------------- */}
+          {/* サブタブ A: ラスベガスタブ (1H〜18H縦並び・○○点表記・段階的表示) */}
+          {/* ------------------------------------------------------------- */}
+          {rankingSubTab === 'vegas' && (
+            <div className="space-y-3">
+              {HOLE_CONFIG.map(h => {
+                const holeNum = h.hole;
+                const par = h.par;
+                const prevDone = isPrevHoleAllCompleted(holeNum);
+                const isTeamDetermined = holeNum === 1 || prevDone;
+                const vegasRes = calculateVegasPointsForHole(holeNum);
+
+                return (
+                  <div key={holeNum} className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between border-b pb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-800">HOLE {holeNum}</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">Par {par}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        {!isTeamDetermined
+                          ? '前H完了待ち (チーム未確定)'
+                          : vegasRes.isAllPairsCompleted
+                          ? '全組完了 (ポイント確定)'
+                          : 'スコア入力進行中'}
+                      </span>
+                    </div>
+
+                    {!isTeamDetermined ? (
+                      <div className="py-3 text-center text-slate-400 text-xs bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                        前ホールの全員入力完了後にチームが決定します
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {vegasRes.evaluatedPairs.map((pair, idx) => {
+                          const pts = vegasRes.teamPoints[idx];
+                          return (
+                            <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-2 flex items-center justify-between text-xs">
+                              <div>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Team {idx + 1}</span>
+                                <div className="font-bold text-slate-800 mt-0.5">
+                                  <span>{pair.p1.name}</span>
+                                  <span className="text-slate-400 mx-1">&</span>
+                                  <span>{pair.p2.name}</span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                {pair.isBothCompleted ? (
+                                  <>
+                                    <span className="text-sm font-black text-slate-900 tracking-wider">
+                                      {pair.teamScore}点
+                                    </span>
+                                    {pts !== undefined && pts > 0 && (
+                                      <span className="block text-[10px] font-bold text-emerald-600">
+                                        +{pts}P
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    {pair.d1.isCompleted || pair.d2.isCompleted ? '片方入力済' : 'スコア未入力'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ------------------------------------------------------------- */}
+          {/* サブタブ B: ボーナスタブ (1H〜18H縦並び・箇条書きリアルタイム反映) */}
+          {/* ------------------------------------------------------------- */}
+          {rankingSubTab === 'bonus' && (
+            <div className="space-y-3">
+              {HOLE_CONFIG.map(h => {
+                const holeNum = h.hole;
+                const par = h.par;
+
+                return (
+                  <div key={holeNum} className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between border-b pb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-800">HOLE {holeNum}</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">Par {par}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">入力完了順リアルタイム反映</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {activePlayers.filter(p => !p.isGhost).map(player => {
+                        const scoreData = getPlayerScoreData(holeNum, player);
+                        const pts = calculateHolePoints(holeNum, player);
+
+                        if (!scoreData.isCompleted) {
+                          return (
+                            <div key={player.id} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-slate-50 text-slate-400">
+                              <span>{player.name}</span>
+                              <span className="text-[10px]">未入力</span>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div key={player.id} className="p-2 rounded-lg bg-slate-50 border border-slate-100 text-xs space-y-1">
+                            <div className="flex items-center justify-between font-bold text-slate-800">
+                              <span>{player.name}</span>
+                              <span className="text-emerald-700">計 {pts.totalP >= 0 ? `+${pts.totalP}` : pts.totalP}P</span>
+                            </div>
+
+                            <ul className="text-[11px] space-y-0.5 text-slate-600 pl-2 border-l-2 border-slate-300">
+                              {pts.breakdown.length === 0 ? (
+                                <li className="text-slate-400">役・ペナルティなし (スコア: Net {scoreData.net})</li>
+                              ) : (
+                                pts.breakdown.map((item, bIdx) => (
+                                  <li key={bIdx} className="flex items-center justify-between">
+                                    <span className={item.type === 'pen' ? 'text-red-600' : item.type === 'auto' ? 'text-emerald-600' : 'text-blue-600'}>
+                                      • {item.label}
+                                    </span>
+                                    <span className="font-bold">
+                                      {item.p > 0 ? `+${item.p}` : item.p}P
+                                    </span>
+                                  </li>
+                                ))
+                              )}
+                            </ul>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* ------------------------------------------------------------- */}
+          {/* サブタブ C: 個人 (18H明細) タブ */}
+          {/* ------------------------------------------------------------- */}
+          {rankingSubTab === 'individual' && (() => {
+            const targetPlayer = activePlayers.find(p => p.id === selectedIndividualPlayerId) || activePlayers[0];
+            const cumStats = calculateAccumulatedStats(18, targetPlayer);
+            const totalTitlePts = titlePointsSummary.playerCumulativeTitle[targetPlayer.id] || 0;
+            const totalVegasPts = totalVegasPMap[targetPlayer.id] || 0;
+            const finalTotalP = cumStats.cumTotalP + totalVegasPts + totalTitlePts;
+
+            const completedCount = cumStats.completedHolesCount || 1;
+            const avgPutts = (cumStats.cumPutts / completedCount).toFixed(2);
+            const parSaveRate = Math.round(((cumStats.eagleCount + cumStats.birdieCount + cumStats.parCount) / completedCount) * 100);
+            const girRate = Math.round((cumStats.girCount / completedCount) * 100);
+            const obRate = Math.round((cumStats.obCount / completedCount) * 100);
+            const threePattRate = Math.round((cumStats.threePatCount / completedCount) * 100);
+            const penaltyHoleRate = Math.round((cumStats.penaltyHolesCount / completedCount) * 100);
+            const bunkerHoleRate = Math.round((cumStats.bunkerHolesCount / completedCount) * 100);
+
+            return (
+              <div className="space-y-3">
+                {/* 1. プレイヤー選択プルダウン */}
+                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">対象プレイヤー:</span>
+                  <select
+                    value={targetPlayer.id}
+                    onChange={(e) => setSelectedIndividualPlayerId(e.target.value)}
+                    className="bg-slate-50 border border-slate-300 rounded px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none"
+                  >
+                    {activePlayers.filter(p => !p.isGhost).map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. その時点での実績サマリー */}
+                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between border-b pb-1.5">
+                    <span className="text-xs font-black text-slate-800">通算実績サマリー</span>
+                    <span className="text-base font-black text-emerald-700">総合 {finalTotalP}P</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">打数 (Net)</span>
+                      <span className="font-black text-slate-800">{cumStats.cumGross} <span className="text-[10px] text-blue-600">({cumStats.cumNet})</span></span>
+                    </div>
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">スコアP</span>
+                      <span className="font-black text-slate-800">+{cumStats.cumScoreP}P</span>
+                    </div>
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">ボナ / ペナ</span>
+                      <span className="font-black text-slate-800">+{cumStats.cumBonusP} / <span className="text-red-600">{cumStats.cumPenP}</span></span>
+                    </div>
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">ベガス / タイトル</span>
+                      <span className="font-black text-slate-800">+{totalVegasPts} / <span className="text-amber-600">+{totalTitlePts}</span></span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. スタッツ分析（入力データから自動算出） */}
+                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
+                  <span className="text-xs font-black text-slate-800 block border-b pb-1.5">スタッツ分析</span>
+                  
+                  {/* スコア分布 */}
+                  <div className="grid grid-cols-5 gap-1 text-center text-[10px]">
+                    <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
+                      <span className="text-emerald-800 block font-medium">イーグル+</span>
+                      <b className="text-xs text-emerald-950">{cumStats.eagleCount}</b>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
+                      <span className="text-emerald-800 block font-medium">バーディ</span>
+                      <b className="text-xs text-emerald-950">{cumStats.birdieCount}</b>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-200 rounded p-1">
+                      <span className="text-blue-800 block font-medium">パー</span>
+                      <b className="text-xs text-blue-950">{cumStats.parCount}</b>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded p-1">
+                      <span className="text-slate-600 block font-medium">ボギー</span>
+                      <b className="text-xs text-slate-800">{cumStats.bogeyCount}</b>
+                    </div>
+                    <div className="bg-red-50 border border-red-200 rounded p-1">
+                      <span className="text-red-800 block font-medium">ダボ+</span>
+                      <b className="text-xs text-red-950">{cumStats.doubleBogeyPlusCount}</b>
+                    </div>
+                  </div>
+
+                  {/* 比率・パットスタッツ */}
+                  <div className="grid grid-cols-3 gap-2 text-center text-[11px] pt-1">
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">平均パット (総数)</span>
+                      <b className="text-slate-800">{avgPutts} <span className="text-[10px] text-slate-400">({cumStats.cumPutts})</span></b>
+                    </div>
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">パーセーブ率</span>
+                      <b className="text-slate-800">{parSaveRate}%</b>
+                    </div>
+                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <span className="text-[10px] text-slate-400 block font-medium">パーオン率 (GIR)</span>
+                      <b className="text-slate-800">{girRate}%</b>
+                    </div>
+                  </div>
+
+                  {/* トラブル・ペナルティ率 */}
+                  <div className="grid grid-cols-4 gap-1.5 text-center text-[10px] pt-1">
+                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
+                      <span className="text-slate-500 block">OB率 (総数)</span>
+                      <b className="text-red-700">{obRate}% ({cumStats.obCount})</b>
+                    </div>
+                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
+                      <span className="text-slate-500 block">バンカー総数 (率)</span>
+                      <b className="text-red-700">{cumStats.bunkerCount}回 ({bunkerHoleRate}%)</b>
+                    </div>
+                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
+                      <span className="text-slate-500 block">3パット率</span>
+                      <b className="text-red-700">{threePattRate}%</b>
+                    </div>
+                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
+                      <span className="text-slate-500 block">ペナ発生率</span>
+                      <b className="text-red-700">{penaltyHoleRate}%</b>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. 18H累計個数サマリー */}
+                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
+                  <span className="text-xs font-black text-slate-800 block border-b pb-1.5">18H累計個数サマリー</span>
+                  
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-blue-600 block">小技ボーナス獲得数</span>
+                    <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
+                        <span className="text-blue-800 block">チップイン</span>
+                        <b className="text-xs text-blue-950">{cumStats.chipInCount}回</b>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
+                        <span className="text-blue-800 block">1パット</span>
+                        <b className="text-xs text-blue-950">{cumStats.onePatCount}回</b>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
+                        <span className="text-blue-800 block">サオイチ</span>
+                        <b className="text-xs text-blue-950">{cumStats.saoIchiCount}回</b>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
+                        <span className="text-blue-800 block">砂イチ</span>
+                        <b className="text-xs text-blue-950">{cumStats.sunaIchiCount}回</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 pt-1 border-t border-slate-100">
+                    <span className="text-[10px] font-bold text-red-600 block">ペナルティ発生数</span>
+                    <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
+                      <div className="bg-red-50 border border-red-200 rounded p-1">
+                        <span className="text-red-800 block">OB</span>
+                        <b className="text-xs text-red-950">{cumStats.obCount}回</b>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-1">
+                        <span className="text-red-800 block">池</span>
+                        <b className="text-xs text-red-950">{cumStats.waterCount}回</b>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-1">
+                        <span className="text-red-800 block">バンカー</span>
+                        <b className="text-xs text-red-950">{cumStats.bunkerCount}回</b>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-1">
+                        <span className="text-red-800 block">3パット</span>
+                        <b className="text-xs text-red-950">{cumStats.threePatCount}回</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 pt-1 border-t border-slate-100">
+                    <span className="text-[10px] font-bold text-emerald-600 block">自動救済賞</span>
+                    <div className="grid grid-cols-2 gap-1 text-center text-[10px]">
+                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
+                        <span className="text-emerald-800 block">バウンスバック賞</span>
+                        <b className="text-xs text-emerald-950">{cumStats.bounceBackCount}回</b>
+                      </div>
+                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
+                        <span className="text-emerald-800 block">OBパー賞 (ダボ耐え)</span>
+                        <b className="text-xs text-emerald-950">{cumStats.obParCount}回</b>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. 1H〜18H縦並び詳細明細（増減内訳完全可視化・「○○点」表記） */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                  <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-black text-slate-800">
+                    全18ホール詳細戦績明細
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {HOLE_CONFIG.map(h => {
+                      const holeNum = h.hole;
+                      const par = h.par;
+                      const d = getPlayerScoreData(holeNum, targetPlayer);
+                      const pts = calculateHolePoints(holeNum, targetPlayer);
+                      const pairs = getHolePairs(holeNum);
+                      const myPair = pairs.find(p => p.p1.id === targetPlayer.id || p.p2.id === targetPlayer.id);
+                      const partner = myPair ? (myPair.p1.id === targetPlayer.id ? myPair.p2 : myPair.p1) : null;
+                      const vegasRes = calculateVegasPointsForHole(holeNum);
+                      const vegasHoleP = vegasRes.playerPoints[targetPlayer.id] || 0;
+                      const titleAwarded = titlePointsSummary.holeAwarded[holeNum]?.winnerId === targetPlayer.id
+                        ? titlePointsSummary.holeAwarded[holeNum].awardedPoint
+                        : 0;
+
+                      const holeFinalP = pts.totalP + vegasHoleP + titleAwarded;
+
+                      return (
+                        <div key={holeNum} className="p-3 text-xs space-y-1.5 hover:bg-slate-50 transition">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800">Hole {holeNum}</span>
+                              <span className="text-[10px] text-slate-500 font-medium">Par {par}</span>
+                              <span className="font-bold text-slate-800">{d.gross}打 (Net {d.net})</span>
+                              <span className="text-[10px] text-slate-400">/{d.putts}パット</span>
+                            </div>
+                            <span className="text-sm font-black text-emerald-700">+{holeFinalP}P</span>
+                          </div>
+
+                          <div className="text-[11px] text-slate-500 flex items-center justify-between">
+                            <span>ペア: <b>{partner ? partner.name : '-'}</b> {myPair && `(${Math.min(d.net, getPlayerScoreData(holeNum, partner).net)}${Math.max(d.net, getPlayerScoreData(holeNum, partner).net)}点)`}</span>
+                            {vegasHoleP > 0 && <span className="text-emerald-600 font-bold">ベガス +{vegasHoleP}P</span>}
+                          </div>
+
+                          {/* 獲得・減点内訳の箇条書き */}
+                          <div className="bg-slate-50 p-2 rounded border border-slate-200/60 text-[11px] space-y-0.5">
+                            {pts.breakdown.map((item, bIdx) => (
+                              <div key={bIdx} className="flex items-center justify-between">
+                                <span className={item.type === 'pen' ? 'text-red-600' : item.type === 'auto' ? 'text-emerald-600' : 'text-blue-600'}>
+                                  • {item.label}
+                                </span>
+                                <span className="font-bold">{item.p > 0 ? `+${item.p}` : item.p}P</span>
+                              </div>
+                            ))}
+                            {titleAwarded > 0 && (
+                              <div className="flex items-center justify-between text-amber-700 font-bold">
+                                <span>🏆 {h.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得</span>
+                                <span>+{titleAwarded}P</span>
+                              </div>
+                            )}
+                            {pts.breakdown.length === 0 && titleAwarded === 0 && (
+                              <span className="text-slate-400">P増減内訳なし</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+        </div>
+      )}
+
+      {/* --- ルール説明 モーダル --- */}
       {showRuleModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
             
-            {/* モーダルヘッダー */}
-            <div className="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-              <h2 className="text-sm font-black text-white flex items-center gap-1.5">
-                <span>📖 公式コンペルール</span>
+            <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                <span>📖 公式コンペルール詳細</span>
               </h2>
               <button
                 onClick={() => setShowRuleModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                className="w-7 h-7 rounded-full bg-slate-200 text-slate-600 text-xs font-bold"
               >
                 ✕
               </button>
             </div>
 
-            {/* 5タブ切り替えバー */}
-            <div className="bg-slate-950/80 px-2 py-1.5 border-b border-slate-800 flex overflow-x-auto no-scrollbar space-x-1 text-[11px] font-bold">
+            <div className="bg-slate-100 px-2 py-1.5 border-b border-slate-200 flex overflow-x-auto no-scrollbar space-x-1 text-[11px] font-bold">
               {[
                 { id: 1, label: '① 概要・HDCP' },
                 { id: 2, label: '② スコア・役' },
@@ -1130,7 +1890,7 @@ function App() {
                   className={`flex-shrink-0 px-2.5 py-1.5 rounded-lg transition ${
                     ruleModalTab === t.id
                       ? 'bg-emerald-600 text-white'
-                      : 'text-slate-400 hover:bg-slate-800'
+                      : 'text-slate-600 hover:bg-slate-200'
                   }`}
                 >
                   {t.label}
@@ -1138,150 +1898,160 @@ function App() {
               ))}
             </div>
 
-            {/* モーダル本文 */}
-            <div className="p-3.5 overflow-y-auto space-y-3.5 text-xs text-slate-300 leading-relaxed">
-              
-              {/* TAB 1: 概要 & HDCP */}
+            <div className="p-3.5 overflow-y-auto space-y-3 text-xs text-slate-700 leading-relaxed">
               {ruleModalTab === 1 && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-emerald-400 text-xs mb-1">1. 大会基本形式</h3>
-                    <p className="text-[11px] text-slate-300">
+                <div className="space-y-2.5">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. 大会基本形式</h3>
+                    <p className="text-[11px]">
                       ・4〜20名対応の完全加算ポイント制。<br/>
                       ・「スコアP」「役ボーナスP」「ラスベガスP」「タイトルP」の全合算で最終順位を決定します。
                     </p>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-amber-400 text-xs mb-1">2. 奇数時のゴースト（欠席枠）自動補完</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・奇数人数の場合、システムが自動で「👻 ゴースト」を1名追加して偶数ペア化。<br/>
-                      ・打数は全ホール<b>「ボギー固定（Par+1）」</b>、入力不要。<br/>
-                      ・ベガス入賞時は<b>生身のパートナーのみポイント獲得</b>（ゴースト分は喪失）。役・タイトルは対象外です。
+                  <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200">
+                    <h3 className="font-bold text-amber-900 text-xs mb-1">2. 奇数時のゴースト自動補完</h3>
+                    <p className="text-[11px]">
+                      ・奇数人数の場合、自動で「👻 ゴースト」が追加され偶数化。<br/>
+                      ・全ホール<b>「ボギー固定（Par+1）」</b>、入力不要。<br/>
+                      ・ベガス入賞時は<b>生身のパートナーのみポイント獲得</b>。
                     </p>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-cyan-400 text-xs mb-1">3. 個別HDCP設定</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・プレイヤーごとに適用ホール（なし/全H/Par4/5/Par4のみ）とHDCP値（+1〜-3）を設定可能。<br/>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-blue-900 text-xs mb-1">3. 個別ハンディキャップ (HDCP)</h3>
+                    <p className="text-[11px]">
+                      ・プレイヤーごとに適用ホールとHDCP値（+1〜-3）を設定。<br/>
                       ・<b>完全ネット基準</b>: スコア判定、ベガス打数、順位付けはすべてネット打数を基準とします。
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* TAB 2: スコア & 役 */}
               {ruleModalTab === 2 && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-emerald-400 text-xs mb-1">1. スコアポイント (ネット基準)</h3>
-                    <ul className="text-[11px] space-y-0.5 text-slate-300">
-                      <li>・イーグル以上: <b className="text-white">+3P</b></li>
-                      <li>・バーディ: <b className="text-white">+2P</b></li>
-                      <li>・パー: <b className="text-white">+1P</b></li>
-                      <li>・ボギー以上: <b className="text-slate-400">0P</b></li>
+                <div className="space-y-2.5">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. スコアポイント (ネット基準)</h3>
+                    <ul className="text-[11px] space-y-0.5">
+                      <li>・イーグル以上: <b>+3P</b></li>
+                      <li>・バーディ: <b>+2P</b></li>
+                      <li>・パー: <b>+1P</b></li>
+                      <li>・ボギー以上: <b>0P（減点なし）</b></li>
                     </ul>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-amber-400 text-xs mb-1">2. 小技ボーナス & ペナルティ</h3>
-                    <ul className="text-[11px] space-y-0.5 text-slate-300">
-                      <li>・チップイン: <b className="text-white">+2P</b></li>
-                      <li>・ワンパット: <b className="text-white">+1P</b></li>
-                      <li>・サオイチ: <b className="text-white">+1P</b> (ワンパット連動で実質+2P)</li>
-                      <li>・砂イチ: <b className="text-white">+1P</b> (バンカー/ワンパット連動で実質+1P)</li>
-                      <li>・OB / 池 / バンカー / 3パット: <b className="text-rose-400">各-1P</b></li>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-blue-900 text-xs mb-1">2. パット連動自動判定 & 小技ボーナス</h3>
+                    <ul className="text-[11px] space-y-0.5">
+                      <li>・0パット: <b>チップイン自動判定 (+2P)</b></li>
+                      <li>・1パット: <b>1パット自動判定 (+1P)</b></li>
+                      <li>・3パット以上: <b className="text-red-600">3パット自動判定 (-1P)</b></li>
+                      <li>・サオイチ: <b>+1P</b> (独立トグル)</li>
+                      <li>・砂イチ: <b>+1P</b> (独立トグル)</li>
+                      <li>・OB / 池 / バンカー: <b className="text-red-600">各-1P</b> (独立トグル)</li>
                     </ul>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-cyan-400 text-xs mb-1">3. 全自動ボーナス (タイブレーク個数除外)</h3>
-                    <ul className="text-[11px] space-y-1 text-slate-300">
-                      <li>
-                        ・<b className="text-emerald-300">バウンスバック賞 (+1P)</b>:<br/>
-                        前HグロスPar+2以上から、次HでPar基準1打以上改善で自動付与。
-                      </li>
-                      <li>
-                        ・<b className="text-emerald-300">OBパー賞 (+1P)</b>:<br/>
-                        OBあり＋グロスPar+2（ダボ）で耐え凌いだ場合に自動付与（実質±0P相殺）。
-                      </li>
-                    </ul>
+                  <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-300">
+                    <h3 className="font-bold text-emerald-950 text-xs mb-1">3. 全自動救済ボーナス詳細 & 具体例</h3>
+                    <div className="space-y-1.5 text-[11px]">
+                      <div>
+                        <b className="text-emerald-900">① バウンスバック賞 (+1P)</b>
+                        <p className="text-slate-600 mt-0.5">
+                          前ホールでグロスPar+2以上（ダボ以上）の大叩きをした後、当該ホールでPar基準1打以上改善した場合に自動付与。
+                        </p>
+                        <div className="bg-white p-2 rounded border border-emerald-200 mt-1 space-y-1 text-[10px]">
+                          <p><span className="text-emerald-700 font-bold">【例A 獲得】</span> 前H(Par4)で「6打(+2)」➔ 次H(Par4)で「5打(+1)」で上がった（1打改善 ➔ <b>+1P獲得！</b>）</p>
+                          <p><span className="text-emerald-700 font-bold">【例B 獲得】</span> 前H(Par5)で「8打(+3)」➔ 次H(Par3)で「3打(Par)」で上がった（3打改善 ➔ <b>+1P獲得！</b>）</p>
+                          <p><span className="text-red-600 font-bold">【例C 対象外】</span> 前H(Par4)で「6打(+2)」➔ 次H(Par4)でも「6打(+2)」だった（改善なし ➔ <b>0P</b>）</p>
+                        </div>
+                      </div>
+                      <div className="pt-1 border-t border-emerald-200">
+                        <b className="text-emerald-900">② OBパー賞 (+1P)</b>
+                        <p className="text-slate-600 mt-0.5">
+                          ティーショット等でOB（前進4打含む）を打ちながらも、グロスPar+2（ダボ耐え）で上がった執念のナイスリカバリーに対して自動付与。
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* TAB 3: ラスベガス */}
               {ruleModalTab === 3 && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-cyan-400 text-xs mb-1">1. ルール概要</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・ペアのネット打数を昇順で並べた2桁数字（例: 4打と5打 ➔ 45組）が小さい方が上位。
+                <div className="space-y-2.5">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. ラスベガスゲーム概要</h3>
+                    <p className="text-[11px]">
+                      ペアのネット打数を昇順で並べた2桁数字（例: 4打と5打 ➔ 45点）が小さいチームが上位。
                     </p>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-emerald-400 text-xs mb-1">2. 上位過半数スライド配当表</h3>
-                    <div className="text-[10px] space-y-1 text-slate-300 mt-1">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">2. 上位過半数スライド配当表</h3>
+                    <div className="text-[10px] space-y-0.5 text-slate-600">
                       <p>・2ペア (4人): 1位 2P</p>
                       <p>・3〜4ペア (5〜8人): 1位 3P / 2位 1P</p>
                       <p>・5〜6ペア (9〜12人): 1位 3P / 2位 2P / 3位 1P</p>
                       <p>・7〜8ペア (13〜16人): 1位 4P / 2位 3P / 3位 2P / 4位 1P</p>
                       <p>・9〜10ペア (17〜20人): 1位 5P / 2位 4P / 3位 3P / 4位 2P / 5位 1P</p>
-                      <p className="text-amber-400 mt-1">※同点時は均等山分け分配。</p>
                     </div>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-amber-400 text-xs mb-1">3. 9段階優先順位 ＆ たすき掛け</h3>
-                    <p className="text-[10px] text-slate-300">
-                      1.前Hネット ➔ 2.前Hグロス ➔ 3.前H役数 ➔ 4.前Hペナ数 ➔ 5.累計ネット ➔ 6.累計グロス ➔ 7.累計役数 ➔ 8.累計ペナ数 ➔ 9.登録順<br/>
-                      厳密に1〜N位を決定後、最上位と最下位を組ませる<b>たすき掛け</b>で編成。前H全員完了まで非公開です。
+                  <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-300">
+                    <h3 className="font-bold text-amber-950 text-xs mb-1">3. 同点（タイ）時の山分け計算 & 具体例</h3>
+                    <p className="text-[11px] text-slate-700">
+                      同じチーム点数で並んだ場合、該当する順位のポイントを合計し、<b>同点チーム数で均等に山分け（スプリット）</b>配当します。
+                    </p>
+                    <div className="bg-white p-2 rounded border border-amber-200 mt-1 space-y-1 text-[10px]">
+                      <p className="font-bold text-amber-900">※5ペア参加（配当: 1位 3P / 2位 2P / 3位 1P）の場合：</p>
+                      <p><span className="text-amber-800 font-bold">【例1：1位タイが2組】</span> 1位(3P) + 2位(2P) = 計5P を2組で等分 ➔ <b>各チーム2.5Pずつ</b>獲得。次点は3位(1P)。</p>
+                      <p><span className="text-amber-800 font-bold">【例2：2位タイが3組】</span> 1位(3P)確定後、2位(2P) + 3位(1P) = 計3P を3組で等分 ➔ <b>各チーム1.0Pずつ</b>獲得。</p>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-blue-900 text-xs mb-1">4. 全11段階タイブレーク & たすき掛け</h3>
+                    <p className="text-[10px] text-slate-600">
+                      1.前Hネット ➔ 2.前Hグロス ➔ 3.前HゲームP ➔ 4.前H小技数 ➔ 5.前Hペナ数 ➔ 6.累計ネット ➔ 7.累計グロス ➔ 8.累計ボナ数 ➔ 9.累計ペナ数 ➔ 10.HDCP ➔ 11.登録順 で厳密に決定し、1位&最下位を組ませる<b>たすき掛け</b>で編成。前H全員完了までチームは非公開です。
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* TAB 4: タイトルP */}
               {ruleModalTab === 4 && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-amber-400 text-xs mb-1">1. 対象ホール & 基本配当</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・ニアピン: Par3 (全4H: 3H, 7H, 12H, 17H)<br/>
-                      ・ドラコン: Par5 (全4H: 2H, 8H, 13H, 18H)<br/>
+                <div className="space-y-2.5">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-amber-900 text-xs mb-1">1. 対象ホール & 基本配当</h3>
+                    <p className="text-[11px]">
+                      ・ニアピン: Par3 (3H, 7H, 12H, 17H)<br/>
+                      ・ドラコン: Par5 (2H, 8H, 13H, 18H)<br/>
                       ・基本配当: <b>10P</b>（該当なし時は次回へ持ち越し / 上限20P）。
                     </p>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-rose-400 text-xs mb-1">2. 累計20P上限 ＆ 完全ブロッカー</h3>
-                    <p className="text-[11px] text-slate-300">
+                  <div className="bg-red-50/70 p-3 rounded-xl border border-red-200">
+                    <h3 className="font-bold text-red-900 text-xs mb-1">2. 累計20P上限 ＆ 完全ブロッカー</h3>
+                    <p className="text-[11px]">
                       ・個人累計で<b>最大20Pまで</b>獲得可能。<br/>
-                      ・すでに累計20Pに達している人が獲得した場合、付与は<b>+0P</b>となり、<b>他人の獲得を阻止してその回のポイントを消滅</b>させます（次への持ち越しもなし）。
+                      ・すでに累計20Pに達している人が獲得した場合、付与は<b>+0P</b>となり、他人の獲得を阻止してその回のポイントを消滅させます。
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* TAB 5: 操作・進行 */}
               {ruleModalTab === 5 && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-emerald-400 text-xs mb-1">1. キーボードレス入力</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・打数は [-] [+] ステッパーで直感調整。<br/>
-                      ・役・ペナルティはワンタップでON/OFF。
+                <div className="space-y-2.5">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. キーボードレス直感操作</h3>
+                    <p className="text-[11px]">
+                      ・打数・パット数は [-] [+] ステッパーで直感調整。<br/>
+                      ・チップイン/1パット/3パットはパット数から完全自動判定。
                     </p>
                   </div>
-                  <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <h3 className="font-bold text-amber-400 text-xs mb-1">2. 安全ガード</h3>
-                    <p className="text-[11px] text-slate-300">
-                      ・前ホール未完了のプレイヤーは次ホールの入力がロックされます。<br/>
-                      ・タイトル対象ホールで未選択のまま進行しようとするとトースト警告で停止します。
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-amber-900 text-xs mb-1">2. 確定と修正</h3>
+                    <p className="text-[11px]">
+                      ・スコア入力後は「✓ スコアを確定する」を押すとカードがグレーアウトし誤操作を防止。<br/>
+                      ・修正したい場合は「✏️ 修正する」を押せばいつでも再調整可能です。
                     </p>
                   </div>
                 </div>
               )}
-
             </div>
 
-            {/* モーダルフッター */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800">
+            <div className="p-3 bg-slate-50 border-t border-slate-200">
               <button
                 onClick={() => setShowRuleModal(false)}
                 className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition"
