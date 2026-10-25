@@ -17,12 +17,20 @@
   <!-- Header -->
   <header class="bg-emerald-700 text-white sticky top-0 z-40 shadow">
     <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-      <h1 class="font-bold text-lg tracking-wide flex items-center gap-2">
-        <span>⛳️</span> ゴルフコンペ集計
-      </h1>
-      <button onclick="openRulesModal()" class="text-xs bg-emerald-800 hover:bg-emerald-600 px-3 py-1.5 rounded-lg border border-emerald-500 font-bold transition-colors">
-        ルール確認
-      </button>
+      <div>
+        <h1 class="font-bold text-lg tracking-wide flex items-center gap-2">
+          <span>⛳️</span> ゴルフコンペ集計
+        </h1>
+        <div id="headerCompeName" class="text-xs text-emerald-200 font-semibold truncate max-w-[200px]"></div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="copyShareUrl()" class="text-xs bg-emerald-800 hover:bg-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-500 font-bold transition-colors">
+          共有URL
+        </button>
+        <button onclick="openRulesModal()" class="text-xs bg-emerald-800 hover:bg-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-500 font-bold transition-colors">
+          ルール確認
+        </button>
+      </div>
     </div>
   </header>
 
@@ -30,7 +38,7 @@
   <main class="max-w-2xl mx-auto p-3 space-y-4">
 
     <!-- TAB 1: スコア入力 -->
-    <section id="tab-score" class="space-y-4">
+    <section id="tab-score" class="hidden space-y-4">
       
       <!-- OUT / IN 2段ホールセレクター -->
       <div class="bg-white rounded-xl shadow-sm p-3 border border-slate-200">
@@ -68,9 +76,7 @@
             Par <span id="currentParLabel">4</span>
           </span>
         </div>
-        <div id="holeTitleContainer" class="flex items-center gap-2">
-          <!-- ニアピン・ドラコン枠 -->
-        </div>
+        <div id="holeTitleContainer" class="flex items-center gap-2"></div>
       </div>
 
       <!-- プレイヤー入力カード一覧 -->
@@ -85,7 +91,7 @@
           <span class="text-xs text-slate-400">項目タップでソート</span>
         </div>
         <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse text-sm">
+          <table class="w-full text-left border-collapse text-sm whitespace-nowrap">
             <thead>
               <tr class="bg-slate-50 text-slate-600 border-b border-slate-200 text-xs">
                 <th class="p-2 text-center">順位</th>
@@ -139,8 +145,29 @@
       </div>
     </section>
 
-    <!-- TAB 4: 幹事・設定 (直接編集可能) -->
-    <section id="tab-admin" class="hidden space-y-4">
+    <!-- TAB 4: 幹事・設定 (初期アクティブ画面) -->
+    <section id="tab-admin" class="space-y-4">
+
+      <!-- 大会・コンペ履歴管理（過去コンペの閲覧・切替・手動削除・新規作成） -->
+      <div class="bg-white rounded-xl shadow-sm p-4 border border-slate-200 space-y-3">
+        <div class="flex justify-between items-center border-b pb-2">
+          <h2 class="text-base font-bold text-slate-800">🏆 大会（コンペ）管理・履歴</h2>
+          <button onclick="createNewCompetition()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow transition-colors">
+            ＋ 新規コンペ作成
+          </button>
+        </div>
+
+        <div>
+          <label class="text-xs font-bold text-slate-600 block mb-1">現在のコンペ名:</label>
+          <input type="text" id="adminCompeNameInput" onchange="updateCurrentCompeName(this.value)" class="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm">
+        </div>
+
+        <div>
+          <div class="text-xs font-bold text-slate-600 mb-1.5">過去のコンペ履歴一覧:</div>
+          <div id="adminCompeHistoryList" class="space-y-2 max-h-48 overflow-y-auto"></div>
+        </div>
+      </div>
+
       <!-- 参加者・ハンデ設定 -->
       <div class="bg-white rounded-xl shadow-sm p-4 border border-slate-200">
         <div class="flex justify-between items-center mb-3">
@@ -159,12 +186,12 @@
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs" id="adminHoleSettings"></div>
       </div>
 
-      <!-- 次ラウンド開始 -->
+      <!-- ラウンドリセット（同設定でスコアのみクリア） -->
       <div class="bg-white rounded-xl shadow-sm p-4 border border-red-200">
         <h2 class="text-base font-bold text-red-700 mb-1">ラウンドリセット</h2>
-        <p class="text-xs text-slate-600 mb-3">参加者やコース設定は維持し、スコアのみを全消去して次ラウンドを開始します。</p>
+        <p class="text-xs text-slate-600 mb-3">参加者名・ハンデ・コース設定はそのままで、現在のコンペの全18ホールスコアのみを消去して再スタートします。</p>
         <button onclick="resetCurrentRoundScores()" class="w-full py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-sm shadow">
-          スコアをリセットして次ラウンド開始
+          現在のスコアをリセットする
         </button>
       </div>
     </section>
@@ -174,7 +201,7 @@
   <!-- Bottom Navigation -->
   <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-40 shadow-lg">
     <div class="max-w-2xl mx-auto grid grid-cols-4 h-16 text-center">
-      <button onclick="switchTab('score')" id="nav-btn-score" class="flex flex-col items-center justify-center text-emerald-600">
+      <button onclick="switchTab('score')" id="nav-btn-score" class="flex flex-col items-center justify-center text-slate-400">
         <span class="text-lg">✏️</span>
         <span class="text-[11px] font-bold">スコア入力</span>
       </button>
@@ -186,7 +213,7 @@
         <span class="text-lg">📋</span>
         <span class="text-[11px] font-bold">順位確認</span>
       </button>
-      <button onclick="switchTab('admin')" id="nav-btn-admin" class="flex flex-col items-center justify-center text-slate-400">
+      <button onclick="switchTab('admin')" id="nav-btn-admin" class="flex flex-col items-center justify-center text-emerald-600">
         <span class="text-lg">⚙️</span>
         <span class="text-[11px] font-bold">幹事設定</span>
       </button>
@@ -239,13 +266,7 @@
 
   <!-- アプリケーションスクリプト -->
   <script>
-    const DEFAULT_PLAYERS = [
-      { id: 'p1', name: '佐藤', hdcp: 12 },
-      { id: 'p2', name: '田中', hdcp: 16 },
-      { id: 'p3', name: '高橋', hdcp: 18 },
-      { id: 'p4', name: '鈴木', hdcp: 24 }
-    ];
-
+    // デフォルトコース定義
     const DEFAULT_HOLES = Array.from({ length: 18 }, (_, i) => ({
       hole: i + 1,
       par: [3, 5, 12, 17].includes(i + 1) ? 3 : [2, 8, 14, 18].includes(i + 1) ? 5 : 4,
@@ -253,30 +274,149 @@
       dragcon: [8, 14].includes(i + 1)
     }));
 
-    let appState = {
-      currentHole: 1,
-      currentTab: 'score',
-      currentSubTab: 'vegas',
-      sortKey: 'totalPt',
-      sortAsc: false,
-      players: JSON.parse(localStorage.getItem('golf_players')) || DEFAULT_PLAYERS,
-      holes: JSON.parse(localStorage.getItem('golf_holes')) || DEFAULT_HOLES,
-      scores: JSON.parse(localStorage.getItem('golf_scores')) || Array.from({ length: 18 }, () => ({})),
-      titles: JSON.parse(localStorage.getItem('golf_titles')) || Array.from({ length: 18 }, () => ({ nearpin: null, dragcon: null }))
-    };
-
-    function saveState() {
-      localStorage.setItem('golf_players', JSON.stringify(appState.players));
-      localStorage.setItem('golf_holes', JSON.stringify(appState.holes));
-      localStorage.setItem('golf_scores', JSON.stringify(appState.scores));
-      localStorage.setItem('golf_titles', JSON.stringify(appState.titles));
+    // 空欄初期プレイヤー（勝手な名前は全廃）
+    function generateInitialPlayers() {
+      return [
+        { id: 'p1', name: '', hdcp: 0 },
+        { id: 'p2', name: '', hdcp: 0 },
+        { id: 'p3', name: '', hdcp: 0 },
+        { id: 'p4', name: '', hdcp: 0 }
+      ];
     }
 
+    // コンペ単位のデータ生成
+    function createCompetitionObject(name, basePlayers = null, baseHoles = null) {
+      const id = 'compe_' + Date.now();
+      const d = new Date();
+      const dateStr = `${d.getFullYear()}/${('0'+(d.getMonth()+1)).slice(-2)}/${('0'+d.getDate()).slice(-2)}`;
+      return {
+        id: id,
+        name: name || `${dateStr} ラウンド`,
+        createdAt: d.toISOString(),
+        players: basePlayers ? JSON.parse(JSON.stringify(basePlayers)) : generateInitialPlayers(),
+        holes: baseHoles ? JSON.parse(JSON.stringify(baseHoles)) : JSON.parse(JSON.stringify(DEFAULT_HOLES)),
+        scores: Array.from({ length: 18 }, () => ({})),
+        titles: Array.from({ length: 18 }, () => ({ nearpin: null, dragcon: null }))
+      };
+    }
+
+    // 全体管理状態
+    let globalStore = {
+      competitions: JSON.parse(localStorage.getItem('golf_competitions_archive')) || {},
+      activeCompeId: localStorage.getItem('golf_active_compe_id') || null
+    };
+
+    // URLパラメータ cid があれば優先
+    const urlParams = new URLSearchParams(window.location.search);
+    const paramCid = urlParams.get('cid');
+    if (paramCid && globalStore.competitions[paramCid]) {
+      globalStore.activeCompeId = paramCid;
+    }
+
+    // 既存コンペが1つもなければ初期コンペを生成
+    if (!globalStore.activeCompeId || !globalStore.competitions[globalStore.activeCompeId]) {
+      const initialCompe = createCompetitionObject('第1回コンペ');
+      globalStore.competitions[initialCompe.id] = initialCompe;
+      globalStore.activeCompeId = initialCompe.id;
+      saveGlobalStore();
+    }
+
+    // 現在のアクティブコンペへのショートカット参照
+    let currentCompe = globalStore.competitions[globalStore.activeCompeId];
+
+    // UI状態（初期起動は「admin: 幹事設定」）
+    let appState = {
+      currentHole: 1,
+      currentTab: 'admin',
+      currentSubTab: 'vegas',
+      sortKey: 'totalPt',
+      sortAsc: false
+    };
+
+    function saveGlobalStore() {
+      localStorage.setItem('golf_competitions_archive', JSON.stringify(globalStore.competitions));
+      localStorage.setItem('golf_active_compe_id', globalStore.activeCompeId);
+    }
+
+    // --- コンペ切り替え・新規・手動削除 ---
+    function switchActiveCompetition(cId) {
+      if (!globalStore.competitions[cId]) return;
+      globalStore.activeCompeId = cId;
+      currentCompe = globalStore.competitions[cId];
+      saveGlobalStore();
+      updateUrlParam(cId);
+      renderCurrentView();
+      showToast(`コンペ「${currentCompe.name}」を表示しました`);
+    }
+
+    function createNewCompetition() {
+      const inherit = confirm('現在のメンバー名・ハンデ・コース設定を引き継いで新規コンペを作成しますか？\n（「キャンセル」を押すと完全新規で作成されます）');
+      const baseP = inherit ? currentCompe.players : null;
+      const baseH = inherit ? currentCompe.holes : null;
+      
+      const newCompe = createCompetitionObject(`新規コンペ (${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`, baseP, baseH);
+      globalStore.competitions[newCompe.id] = newCompe;
+      globalStore.activeCompeId = newCompe.id;
+      currentCompe = newCompe;
+      saveGlobalStore();
+      updateUrlParam(newCompe.id);
+      renderCurrentView();
+      showToast('新規コンペを作成しました（過去データは保持されています）');
+    }
+
+    function deleteCompetition(cId) {
+      const target = globalStore.competitions[cId];
+      if (!target) return;
+      const keys = Object.keys(globalStore.competitions);
+      if (keys.length <= 1) {
+        showToast('これ以上コンペを削除できません（最低1つ必要です）');
+        return;
+      }
+      if (!confirm(`本当にコンペ「${target.name}」を削除しますか？\n※この操作は取り消せません。`)) {
+        return;
+      }
+
+      delete globalStore.competitions[cId];
+      if (globalStore.activeCompeId === cId) {
+        globalStore.activeCompeId = Object.keys(globalStore.competitions)[0];
+        currentCompe = globalStore.competitions[globalStore.activeCompeId];
+        updateUrlParam(globalStore.activeCompeId);
+      }
+      saveGlobalStore();
+      renderCurrentView();
+      showToast('コンペを削除しました');
+    }
+
+    function updateCurrentCompeName(name) {
+      currentCompe.name = name.trim() || currentCompe.name;
+      saveGlobalStore();
+      document.getElementById('headerCompeName').textContent = currentCompe.name;
+      renderAdminHistoryList();
+    }
+
+    function updateUrlParam(cId) {
+      const url = new URL(window.location);
+      url.searchParams.set('cid', cId);
+      window.history.replaceState({}, '', url);
+    }
+
+    function copyShareUrl() {
+      const url = `${window.location.origin}${window.location.pathname}?cid=${currentCompe.id}`;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(() => {
+          showToast('共有URLをクリップボードにコピーしました');
+        });
+      } else {
+        prompt('このコンペの専用共有URLです:', url);
+      }
+    }
+
+    // --- スコア取得・計算ロジック ---
     function getPlayerScore(holeNum, pId) {
       const hIdx = holeNum - 1;
-      const hole = appState.holes[hIdx];
-      if (!appState.scores[hIdx][pId]) {
-        appState.scores[hIdx][pId] = {
+      const hole = currentCompe.holes[hIdx];
+      if (!currentCompe.scores[hIdx][pId]) {
+        currentCompe.scores[hIdx][pId] = {
           gross: hole.par,
           putts: 2,
           saoichi: false,
@@ -287,20 +427,20 @@
           locked: false
         };
       }
-      return appState.scores[hIdx][pId];
+      return currentCompe.scores[hIdx][pId];
     }
 
     function getPlayerNet(pId, holeNum) {
       const sc = getPlayerScore(holeNum, pId);
-      const player = appState.players.find(p => p.id === pId) || { hdcp: 0 };
+      const player = currentCompe.players.find(p => p.id === pId) || { hdcp: 0 };
       return Math.max(1, sc.gross - (player.hdcp / 18));
     }
 
     function isBounceBack(pId, holeNum) {
       if (holeNum <= 1) return false;
-      const prevPar = appState.holes[holeNum - 2].par;
+      const prevPar = currentCompe.holes[holeNum - 2].par;
       const prevSc = getPlayerScore(holeNum - 1, pId);
-      const curPar = appState.holes[holeNum - 1].par;
+      const curPar = currentCompe.holes[holeNum - 1].par;
       const curSc = getPlayerScore(holeNum, pId);
 
       const prevDiff = prevSc.gross - prevPar;
@@ -310,14 +450,14 @@
     }
 
     function isOBPar(pId, holeNum) {
-      const curPar = appState.holes[holeNum - 1].par;
+      const curPar = currentCompe.holes[holeNum - 1].par;
       const curSc = getPlayerScore(holeNum, pId);
       return curSc.ob && curSc.gross <= curPar;
     }
 
     function calcPlayerHolePoints(pId, holeNum) {
       const hIdx = holeNum - 1;
-      const par = appState.holes[hIdx].par;
+      const par = currentCompe.holes[hIdx].par;
       const sc = getPlayerScore(holeNum, pId);
 
       let scorePt = 0;
@@ -344,7 +484,7 @@
       if (sc.bunker) penPt += 1;
 
       let titlePt = 0;
-      const title = appState.titles[hIdx];
+      const title = currentCompe.titles[hIdx];
       if (title.nearpin === pId) titlePt += 1;
       if (title.dragcon === pId) titlePt += 1;
 
@@ -359,8 +499,8 @@
 
     // 11段階タイブレーク
     function evaluatePlayerPriority(pId, prevHoleNum) {
-      const p = appState.players.find(x => x.id === pId);
-      const regIndex = appState.players.findIndex(x => x.id === pId);
+      const p = currentCompe.players.find(x => x.id === pId);
+      const regIndex = currentCompe.players.findIndex(x => x.id === pId);
       if (prevHoleNum <= 0) {
         return [0, 0, p.hdcp, 0, 0, 0, 0, 0, 0, 0, regIndex];
       }
@@ -399,11 +539,11 @@
     }
 
     function getHolePairings(holeNum) {
-      const pCount = appState.players.length;
+      const pCount = currentCompe.players.length;
       if (pCount < 4) return [];
 
       const prevH = holeNum - 1;
-      const sorted = [...appState.players].sort((a, b) => {
+      const sorted = [...currentCompe.players].sort((a, b) => {
         return comparePriority(evaluatePlayerPriority(a.id, prevH), evaluatePlayerPriority(b.id, prevH));
       });
 
@@ -411,7 +551,7 @@
       const numPairs = Math.floor(pCount / 2);
       for (let i = 0; i < numPairs; i++) {
         pairs.push({
-          teamName: `${sorted[i].name} & ${sorted[pCount - 1 - i].name}`,
+          teamName: `${sorted[i].name || '未設定'} & ${sorted[pCount - 1 - i].name || '未設定'}`,
           p1: sorted[i],
           p2: sorted[pCount - 1 - i]
         });
@@ -422,13 +562,13 @@
     function calcHoleVegas(holeNum) {
       const hIdx = holeNum - 1;
       const pairs = getHolePairings(holeNum);
-      if (pairs.length === 0) return { pairs: [], isComplete: false };
+      if (pairs.length === 0) return { pairs: [], isComplete: false, prevHoleAllLocked: false };
 
-      const prevHoleAllLocked = holeNum === 1 ? true : appState.players.every(p => appState.scores[hIdx - 1][p.id]?.locked);
+      const prevHoleAllLocked = holeNum === 1 ? true : currentCompe.players.every(p => currentCompe.scores[hIdx - 1][p.id]?.locked);
 
       const teamResults = pairs.map(pr => {
-        const sc1 = appState.scores[hIdx][pr.p1.id];
-        const sc2 = appState.scores[hIdx][pr.p2.id];
+        const sc1 = currentCompe.scores[hIdx][pr.p1.id];
+        const sc2 = currentCompe.scores[hIdx][pr.p2.id];
         const isBothLocked = sc1?.locked && sc2?.locked;
 
         if (!isBothLocked) {
@@ -468,9 +608,9 @@
       return { pairs: teamResults, isComplete, prevHoleAllLocked };
     }
 
-    // --- スコア入力画面レンダリング ---
+    // --- TAB 1: スコア入力画面 ---
     function renderScoreTab() {
-      const hole = appState.holes[appState.currentHole - 1];
+      const hole = currentCompe.holes[appState.currentHole - 1];
       document.getElementById('currentHoleLabel').textContent = `${hole.hole}H`;
       document.getElementById('currentParLabel').textContent = hole.par;
 
@@ -482,10 +622,10 @@
         activeBtn.className = "hole-btn py-2 text-center rounded-lg font-bold text-sm border transition-all bg-emerald-600 text-white border-emerald-600 shadow";
       }
 
-      // タイトル
+      // タイトル枠
       const titleCont = document.getElementById('holeTitleContainer');
       titleCont.innerHTML = '';
-      const hTitles = appState.titles[appState.currentHole - 1];
+      const hTitles = currentCompe.titles[appState.currentHole - 1];
 
       if (hole.nearpin) {
         titleCont.innerHTML += `
@@ -493,7 +633,7 @@
             <span class="text-xs font-bold text-amber-800">ニアピン:</span>
             <select onchange="updateTitle('nearpin', this.value)" class="text-xs bg-white border border-amber-300 rounded px-1 py-0.5 font-bold">
               <option value="">未確定</option>
-              ${appState.players.map(p => `<option value="${p.id}" ${hTitles.nearpin === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+              ${currentCompe.players.map(p => `<option value="${p.id}" ${hTitles.nearpin === p.id ? 'selected' : ''}>${p.name || '名前未設定'}</option>`).join('')}
             </select>
           </div>
         `;
@@ -504,7 +644,7 @@
             <span class="text-xs font-bold text-blue-800">ドラコン:</span>
             <select onchange="updateTitle('dragcon', this.value)" class="text-xs bg-white border border-blue-300 rounded px-1 py-0.5 font-bold">
               <option value="">未確定</option>
-              ${appState.players.map(p => `<option value="${p.id}" ${hTitles.dragcon === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+              ${currentCompe.players.map(p => `<option value="${p.id}" ${hTitles.dragcon === p.id ? 'selected' : ''}>${p.name || '名前未設定'}</option>`).join('')}
             </select>
           </div>
         `;
@@ -514,21 +654,19 @@
       const playerList = document.getElementById('playerInputList');
       playerList.innerHTML = '';
 
-      appState.players.forEach(p => {
+      currentCompe.players.forEach(p => {
         const sc = getPlayerScore(appState.currentHole, p.id);
         const isLocked = sc.locked;
 
         const card = document.createElement('div');
         card.className = `rounded-xl border transition-all p-4 ${
-          isLocked 
-            ? 'bg-slate-200/80 border-slate-300 opacity-80' 
-            : 'bg-white border-slate-200 shadow-sm'
+          isLocked ? 'bg-slate-200/80 border-slate-300 opacity-80' : 'bg-white border-slate-200 shadow-sm'
         }`;
 
         card.innerHTML = `
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
-              <span class="font-black text-lg ${isLocked ? 'text-slate-600' : 'text-slate-800'}">${p.name}</span>
+              <span class="font-black text-lg ${isLocked ? 'text-slate-600' : 'text-slate-800'}">${p.name || '名前未設定'}</span>
               <span class="text-xs bg-white/80 text-slate-500 font-bold px-2 py-0.5 rounded-full border border-slate-200">HDCP ${p.hdcp}</span>
             </div>
             ${isLocked ? '<span class="text-xs font-bold text-slate-500 bg-slate-300/60 px-2 py-0.5 rounded">確定済み・ロック中</span>' : ''}
@@ -612,8 +750,8 @@
     }
 
     function selectHole(hNum) {
-      const curHole = appState.holes[appState.currentHole - 1];
-      const curTitles = appState.titles[appState.currentHole - 1];
+      const curHole = currentCompe.holes[appState.currentHole - 1];
+      const curTitles = currentCompe.titles[appState.currentHole - 1];
       if ((curHole.nearpin && !curTitles.nearpin) || (curHole.dragcon && !curTitles.dragcon)) {
         showToast(`${appState.currentHole}Hのニアピン/ドラコンが未入力です`);
       }
@@ -625,7 +763,7 @@
       const sc = getPlayerScore(appState.currentHole, pId);
       if (sc.locked) return;
       sc.gross = Math.max(1, sc.gross + delta);
-      saveState();
+      saveGlobalStore();
       renderScoreTab();
     }
 
@@ -633,7 +771,7 @@
       const sc = getPlayerScore(appState.currentHole, pId);
       if (sc.locked) return;
       sc.putts = Math.max(0, Math.min(9, sc.putts + delta));
-      saveState();
+      saveGlobalStore();
       renderScoreTab();
     }
 
@@ -642,34 +780,34 @@
       if (sc.locked) return;
       sc[flag] = !sc[flag];
 
-      // 砂イチON時にバンカーのみ自動ON（サオイチは独立のまま維持）
+      // 砂イチON時にバンカーのみ自動ON（サオイチは独立維持）
       if (flag === 'sunaichi' && sc.sunaichi) {
         sc.bunker = true;
       }
 
-      saveState();
+      saveGlobalStore();
       renderScoreTab();
     }
 
     function toggleLock(pId) {
       const sc = getPlayerScore(appState.currentHole, pId);
       sc.locked = !sc.locked;
-      saveState();
+      saveGlobalStore();
       renderScoreTab();
     }
 
     function updateTitle(type, pId) {
-      appState.titles[appState.currentHole - 1][type] = pId || null;
-      saveState();
+      currentCompe.titles[appState.currentHole - 1][type] = pId || null;
+      saveGlobalStore();
       renderScoreTab();
     }
 
-    // --- リーダーボード ---
+    // --- TAB 2: リーダーボード ---
     function renderLeaderboard() {
       const tbody = document.getElementById('leaderboardTbody');
       tbody.innerHTML = '';
 
-      const list = appState.players.map(p => {
+      const list = currentCompe.players.map(p => {
         let gross = 0, net = 0, scorePt = 0, bonusPt = 0, penPt = 0, titlePt = 0, vegasPt = 0;
 
         for (let h = 1; h <= 18; h++) {
@@ -692,7 +830,7 @@
 
         return {
           id: p.id,
-          name: p.name,
+          name: p.name || '名前未設定',
           gross,
           net: parseFloat(net.toFixed(1)),
           scorePt,
@@ -743,7 +881,7 @@
       renderLeaderboard();
     }
 
-    // --- 順位確認（3大サブタブ） ---
+    // --- TAB 3: 順位確認（3大サブタブ） ---
     function selectDetailSubTab(sub) {
       appState.currentSubTab = sub;
       ['vegas', 'bonus', 'personal'].forEach(t => {
@@ -805,7 +943,7 @@
 
         card.innerHTML = `
           <div class="flex items-center justify-between border-b pb-2">
-            <span class="font-black text-slate-800">${h}H (Par ${appState.holes[h-1].par})</span>
+            <span class="font-black text-slate-800">${h}H (Par ${currentCompe.holes[h-1].par})</span>
             ${headerStatus}
           </div>
           ${bodyHtml}
@@ -819,16 +957,16 @@
       cont.innerHTML = '';
 
       for (let h = 1; h <= 18; h++) {
-        const par = appState.holes[h - 1].par;
+        const par = currentCompe.holes[h - 1].par;
         const card = document.createElement('div');
         card.className = "bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 space-y-2";
 
-        const playerItems = appState.players.map(p => {
+        const playerItems = currentCompe.players.map(p => {
           const sc = getPlayerScore(h, p.id);
           if (!sc.locked) {
             return `
               <div class="flex items-center justify-between text-xs py-1 border-b border-slate-100">
-                <span class="font-bold text-slate-400">${p.name}</span>
+                <span class="font-bold text-slate-400">${p.name || '名前未設定'}</span>
                 <span class="text-slate-400 italic">入力中...</span>
               </div>
             `;
@@ -853,13 +991,13 @@
           if (sc.ike) events.push('<span class="text-red-600 font-bold">池 (-1P)</span>');
           if (sc.bunker) events.push('<span class="text-red-600 font-bold">バンカー (-1P)</span>');
 
-          const title = appState.titles[h - 1];
+          const title = currentCompe.titles[h - 1];
           if (title.nearpin === p.id) events.push('<span class="text-amber-600 font-bold">ニアピン (+1P)</span>');
           if (title.dragcon === p.id) events.push('<span class="text-amber-600 font-bold">ドラコン (+1P)</span>');
 
           return `
             <div class="text-xs py-1 border-b border-slate-100 last:border-none">
-              <div class="font-bold text-slate-800 mb-0.5">${p.name} (打数 ${sc.gross} / パット ${sc.putts})</div>
+              <div class="font-bold text-slate-800 mb-0.5">${p.name || '名前未設定'} (打数 ${sc.gross} / パット ${sc.putts})</div>
               <div class="flex flex-wrap gap-x-2 text-[11px]">
                 ${events.length > 0 ? events.join('・') : '<span class="text-slate-400">役なし</span>'}
               </div>
@@ -880,12 +1018,12 @@
 
     function initPersonalDropdown() {
       const sel = document.getElementById('personalPlayerSelect');
-      sel.innerHTML = appState.players.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      sel.innerHTML = currentCompe.players.map(p => `<option value="${p.id}">${p.name || '名前未設定'}</option>`).join('');
     }
 
     function renderPersonalDetail() {
       const sel = document.getElementById('personalPlayerSelect');
-      const pId = sel.value || appState.players[0]?.id;
+      const pId = sel.value || currentCompe.players[0]?.id;
       if (!pId) return;
 
       const statsArea = document.getElementById('personalStatsArea');
@@ -900,7 +1038,7 @@
       let totalVegas = 0, totalScorePt = 0, totalBonusPt = 0, totalPenPt = 0, totalTitlePt = 0;
 
       for (let h = 1; h <= 18; h++) {
-        const par = appState.holes[h - 1].par;
+        const par = currentCompe.holes[h - 1].par;
         const sc = getPlayerScore(h, pId);
 
         gross += sc.gross;
@@ -1039,7 +1177,7 @@
       // 1〜18H縦並び詳細
       holeList.innerHTML = '';
       for (let h = 1; h <= 18; h++) {
-        const par = appState.holes[h - 1].par;
+        const par = currentCompe.holes[h - 1].par;
         const sc = getPlayerScore(h, pId);
         const card = document.createElement('div');
         card.className = "bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 space-y-2";
@@ -1079,7 +1217,7 @@
         if (sc.ike) breakdown.push(`<span class="text-red-600">池 (-1)</span>`);
         if (sc.bunker) breakdown.push(`<span class="text-red-600">バンカー (-1)</span>`);
 
-        const titles = appState.titles[h - 1];
+        const titles = currentCompe.titles[h - 1];
         if (titles.nearpin === pId) breakdown.push(`ニアピン (+1)`);
         if (titles.dragcon === pId) breakdown.push(`ドラコン (+1)`);
 
@@ -1099,32 +1237,39 @@
       }
     }
 
-    // --- 幹事設定画面 ---
+    // --- TAB 4: 幹事・設定画面 ---
     function renderAdminTab() {
+      // コンペ名反映
+      document.getElementById('adminCompeNameInput').value = currentCompe.name;
+      document.getElementById('headerCompeName').textContent = currentCompe.name;
+      renderAdminHistoryList();
+
+      // プレイヤー設定リスト
       const pList = document.getElementById('adminPlayerList');
       pList.innerHTML = '';
-      document.getElementById('playerCountBadge').textContent = `${appState.players.length}名登録`;
+      document.getElementById('playerCountBadge').textContent = `${currentCompe.players.length}名登録`;
 
-      appState.players.forEach((p, idx) => {
+      currentCompe.players.forEach((p, idx) => {
         const item = document.createElement('div');
         item.className = "flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-200 text-xs";
         item.innerHTML = `
           <span class="font-bold text-slate-400 w-4">${idx + 1}</span>
-          <input type="text" value="${p.name}" onchange="updatePlayerName('${p.id}', this.value)" class="flex-1 p-1.5 bg-white border border-slate-300 rounded font-bold text-slate-800 text-xs">
+          <input type="text" placeholder="名前を入力" value="${p.name}" onchange="updatePlayerName('${p.id}', this.value)" class="flex-1 p-1.5 bg-white border border-slate-300 rounded font-bold text-slate-800 text-xs">
           <div class="flex items-center gap-1">
             <span class="text-slate-500 font-bold">HDCP:</span>
             <input type="number" value="${p.hdcp}" onchange="updatePlayerHdcp('${p.id}', this.value)" class="w-14 p-1.5 bg-white border border-slate-300 rounded font-mono text-center text-xs">
           </div>
-          ${appState.players.length > 4 ? `
+          ${currentCompe.players.length > 4 ? `
             <button onclick="removePlayer('${p.id}')" class="p-1.5 text-red-500 font-bold hover:bg-red-50 rounded">削除</button>
           ` : ''}
         `;
         pList.appendChild(item);
       });
 
+      // コース設定
       const hSettings = document.getElementById('adminHoleSettings');
       hSettings.innerHTML = '';
-      appState.holes.forEach(h => {
+      currentCompe.holes.forEach(h => {
         const box = document.createElement('div');
         box.className = "bg-slate-50 p-2 rounded border border-slate-200 space-y-1";
         box.innerHTML = `
@@ -1149,63 +1294,95 @@
       });
     }
 
+    function renderAdminHistoryList() {
+      const cont = document.getElementById('adminCompeHistoryList');
+      if (!cont) return;
+      cont.innerHTML = '';
+
+      Object.values(globalStore.competitions).forEach(c => {
+        const isActive = c.id === currentCompe.id;
+        const row = document.createElement('div');
+        row.className = `flex items-center justify-between p-2 rounded-lg border text-xs transition-colors ${
+          isActive ? 'bg-emerald-50 border-emerald-400' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+        }`;
+
+        row.innerHTML = `
+          <div onclick="switchActiveCompetition('${c.id}')" class="flex-1 cursor-pointer">
+            <span class="font-bold ${isActive ? 'text-emerald-800' : 'text-slate-800'}">${c.name}</span>
+            ${isActive ? '<span class="ml-1 text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded font-bold">現在表示中</span>' : ''}
+          </div>
+          <div class="flex items-center gap-2">
+            ${!isActive ? `
+              <button onclick="switchActiveCompetition('${c.id}')" class="text-xs text-emerald-700 font-bold hover:underline">
+                開く
+              </button>
+            ` : ''}
+            <button onclick="deleteCompetition('${c.id}')" class="text-xs text-red-500 font-bold hover:underline px-1">
+              削除
+            </button>
+          </div>
+        `;
+        cont.appendChild(row);
+      });
+    }
+
     function addPlayer() {
-      if (appState.players.length >= 20) {
+      if (currentCompe.players.length >= 20) {
         showToast('参加者は最大20名までです');
         return;
       }
-      appState.players.push({
+      currentCompe.players.push({
         id: `p${Date.now()}`,
-        name: `選手${appState.players.length + 1}`,
-        hdcp: 18
+        name: '',
+        hdcp: 0
       });
-      saveState();
+      saveGlobalStore();
       renderAdminTab();
     }
 
     function removePlayer(pId) {
-      if (appState.players.length <= 4) {
+      if (currentCompe.players.length <= 4) {
         showToast('最低4名の参加者が必要です');
         return;
       }
-      appState.players = appState.players.filter(p => p.id !== pId);
-      saveState();
+      currentCompe.players = currentCompe.players.filter(p => p.id !== pId);
+      saveGlobalStore();
       renderAdminTab();
     }
 
     function updatePlayerName(pId, val) {
-      const p = appState.players.find(x => x.id === pId);
-      if (p) p.name = val.trim() || p.name;
-      saveState();
+      const p = currentCompe.players.find(x => x.id === pId);
+      if (p) p.name = val.trim();
+      saveGlobalStore();
     }
 
     function updatePlayerHdcp(pId, val) {
-      const p = appState.players.find(x => x.id === pId);
+      const p = currentCompe.players.find(x => x.id === pId);
       if (p) p.hdcp = parseFloat(val) || 0;
-      saveState();
+      saveGlobalStore();
     }
 
     function updateHolePar(hNum, val) {
-      appState.holes[hNum - 1].par = parseInt(val, 10);
-      saveState();
+      currentCompe.holes[hNum - 1].par = parseInt(val, 10);
+      saveGlobalStore();
     }
 
     function toggleHoleTitle(hNum, titleType) {
-      const h = appState.holes[hNum - 1];
+      const h = currentCompe.holes[hNum - 1];
       h[titleType] = !h[titleType];
-      saveState();
+      saveGlobalStore();
     }
 
     function resetCurrentRoundScores() {
-      if (!confirm('メンバーとコース設定はそのままで、18ホール全スコアをリセットして次ラウンドを開始しますか？')) {
+      if (!confirm(`コンペ「${currentCompe.name}」のメンバー・コース設定は維持したまま、18ホールの全スコアのみを消去して再スタートしますか？`)) {
         return;
       }
-      appState.scores = Array.from({ length: 18 }, () => ({}));
-      appState.titles = Array.from({ length: 18 }, () => ({ nearpin: null, dragcon: null }));
+      currentCompe.scores = Array.from({ length: 18 }, () => ({}));
+      currentCompe.titles = Array.from({ length: 18 }, () => ({ nearpin: null, dragcon: null }));
       appState.currentHole = 1;
-      saveState();
+      saveGlobalStore();
       renderCurrentView();
-      showToast('スコアを初期化し、次ラウンドを開始しました');
+      showToast('現在のコンペのスコアを初期化しました');
       switchTab('score');
     }
 
@@ -1252,9 +1429,11 @@
       document.getElementById('rulesModal').classList.add('hidden');
     }
 
-    // 初期起動
+    // 初期起動時実行
     window.addEventListener('DOMContentLoaded', () => {
-      renderScoreTab();
+      // 初期起動は幹事設定タブを表示
+      switchTab('admin');
+      updateUrlParam(currentCompe.id);
     });
   </script>
 </body>
