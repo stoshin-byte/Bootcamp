@@ -92,7 +92,7 @@ const VEGAS_PAYOUT_TABLE = {
   10: [5, 4, 3, 2, 1]
 };
 
-// 初期プレイヤー20名（名前はすべて空欄）
+// 初期プレイヤー20名（名前は空欄）
 const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
   id: `p${i + 1}`,
   name: '',
@@ -101,15 +101,14 @@ const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
   isGhost: false
 }));
 
-// デフォルトのPar3 / Par5ホール（各4つ）
 const DEFAULT_PAR3_HOLES = [3, 7, 12, 17];
 const DEFAULT_PAR5_HOLES = [2, 8, 13, 18];
 
 function App() {
-  // モード判定: URLクエリ ?mode=admin があれば幹事画面、それ以外はすべて一般プレイヤー画面
+  // 初期表示の判定: URLに明確に ?mode=player がある場合のみプレイヤー画面、通常のアクセスはすべて「幹事ページ (admin)」から開始
   const [viewMode, setViewMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'admin' ? 'admin' : 'player';
+    return params.get('mode') === 'player' ? 'player' : 'admin';
   });
 
   // コンペ/ラウンドID
@@ -125,7 +124,7 @@ function App() {
   // 個人タブ選択中プレイヤーID
   const [selectedIndividualPlayerId, setSelectedIndividualPlayerId] = useState('p1');
 
-  // クラウド同期ステータス ('syncing' | 'synced' | 'local' | 'error')
+  // クラウド同期ステータス
   const [syncStatus, setSyncStatus] = useState('local');
 
   // 総合リーダーボードソート状態
@@ -233,7 +232,6 @@ function App() {
     };
   }, [compId]);
 
-  // クラウドへの保存
   const saveToCloud = async (isManualChange = true) => {
     if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) return;
     if (isRemoteUpdatingRef.current) return;
@@ -271,7 +269,6 @@ function App() {
     return () => clearTimeout(timer);
   }, [playerCount, players, par3Holes, par5Holes, titleWinners, scores, h1RandomOrder]);
 
-  // --- アクティブプレイヤーリスト ---
   const activePlayers = useMemo(() => {
     const raw = players.slice(0, playerCount).map((p, idx) => ({
       ...p,
@@ -787,7 +784,6 @@ function App() {
     setCurrentHole(nextHole);
   };
 
-  // Par3 / Par5 ホール切り替え
   const handleParSelect = (targetType, slotIndex, newHole) => {
     const val = parseInt(newHole, 10);
     if (targetType === 'par3') {
@@ -813,9 +809,10 @@ function App() {
     showToast("🔄 スコアを全リセットし、新ラウンドを開始しました！");
   };
 
+  // 参加者専用のURL（?mode=player を自動付与）
   const getPlayerShareUrl = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('mode'); // プレイヤー用は幹事モードを完全に排除
+    const url = new URL(window.location.origin + window.location.pathname);
+    url.searchParams.set('mode', 'player');
     url.searchParams.set('comp', compId);
     return url.toString();
   };
@@ -838,7 +835,7 @@ function App() {
   const currentHoleConfig = holeConfig[currentHole - 1];
 
   // =========================================================================
-  // VIEW 1: 幹事専用ダッシュボード (URLに ?mode=admin がある場合のみ表示)
+  // VIEW 1: 幹事専用ダッシュボード (通常の初期表示)
   // =========================================================================
   if (viewMode === 'admin') {
     return (
@@ -853,7 +850,7 @@ function App() {
           <div>
             <h1 className="text-base font-bold flex items-center gap-1.5">
               <span>⛳️</span>
-              <span>ゴルフコンペ 幹事専用ダッシュボード</span>
+              <span>ゴルフコンペ 幹事ダッシュボード</span>
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[10px] text-emerald-100 font-mono">ID: {compId}</span>
@@ -862,9 +859,9 @@ function App() {
                 syncStatus === 'syncing' ? 'bg-amber-500 text-white animate-pulse' :
                 syncStatus === 'local' ? 'bg-slate-700 text-slate-300' : 'bg-red-700 text-white'
               }`}>
-                {syncStatus === 'synced' ? '☁️ クラウド同期中' :
+                {syncStatus === 'synced' ? '☁️ 同期完了' :
                  syncStatus === 'syncing' ? '🔄 同期中...' :
-                 syncStatus === 'local' ? '💾 ローカル運用中' : '⚠️ 同期エラー'}
+                 syncStatus === 'local' ? '💾 ローカル運用' : '⚠️ 同期エラー'}
               </span>
             </div>
           </div>
@@ -877,11 +874,11 @@ function App() {
         </header>
 
         <main className="flex-1 p-4 space-y-4">
-          {/* コンペID / クラウド管理 */}
+          {/* コンペID */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700">クラウド コンペ識別コード</span>
-              <span className="text-[10px] text-slate-400">別端末と同一IDで常時同期</span>
+              <span className="text-xs font-bold text-slate-700">コンペ識別ID</span>
+              <span className="text-[10px] text-slate-400">同期キー</span>
             </div>
             <div className="flex gap-2">
               <input
@@ -903,7 +900,7 @@ function App() {
             </div>
           </div>
 
-          {/* コース設定: Par3 / Par5 各4ホール選択 */}
+          {/* コース設定: Par3 / Par5 各4ホール指定 */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
             <div>
               <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -913,7 +910,7 @@ function App() {
               <p className="text-[10px] text-slate-400 mt-0.5">※指定外の10ホールは自動的にPar4になります。ニアピン・ドラコンも連動します。</p>
             </div>
 
-            {/* Par 3 (ニアピン連動) */}
+            {/* Par 3 (ニアピン) */}
             <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
               <span className="text-[11px] font-bold text-amber-900 block">🎯 Par 3 ホール（自動でニアピン対象）</span>
               <div className="grid grid-cols-4 gap-2">
@@ -932,7 +929,7 @@ function App() {
               </div>
             </div>
 
-            {/* Par 5 (ドラコン連動) */}
+            {/* Par 5 (ドラコン) */}
             <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
               <span className="text-[11px] font-bold text-blue-900 block">🚀 Par 5 ホール（自動でドラコン対象）</span>
               <div className="grid grid-cols-4 gap-2">
@@ -1003,17 +1000,17 @@ function App() {
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1 shadow-xs transition"
               >
                 <span>🏌️‍♂️</span>
-                <span>プレイヤー画面を開く</span>
+                <span>スコア入力画面を開く</span>
               </button>
             </div>
           </div>
 
-          {/* 連続ラウンド用：スコア初期化機能 */}
+          {/* スコア初期化 */}
           <div className="bg-red-50/60 border border-red-200 rounded-xl p-3.5 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-xs font-bold text-red-900">🔄 次ラウンド開始（スコアリセット）</h3>
-                <p className="text-[10px] text-slate-500">メンバー名・HDCP設定はそのまま維持してスコアのみクリア</p>
+                <p className="text-[10px] text-slate-500">メンバー名・HDCP設定は維持してスコアのみクリア</p>
               </div>
               <button
                 onClick={() => setShowResetModal(true)}
@@ -1024,13 +1021,13 @@ function App() {
             </div>
           </div>
 
-          {/* プレイヤー一覧・ハンディ設定（空欄初期値） */}
+          {/* 参加者・ハンデ設定 */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between px-1">
               <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
                 参加者・ハンデ設定 ({playerCount}名)
               </h2>
-              <span className="text-[10px] text-slate-400">リアルタイム同期中</span>
+              <span className="text-[10px] text-slate-400">自動同期中</span>
             </div>
 
             {players.slice(0, playerCount).map((p, idx) => (
@@ -1098,8 +1095,8 @@ function App() {
                 <span>新ラウンドの開始確認</span>
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                全18ホールの入力済みスコア・確定ステータス・タイトル獲得データをすべて初期化します。<br/>
-                ※参加プレイヤー名とハンディキャップ（HDCP）設定はそのまま保持されます。
+                全18ホールの入力済みスコア・確定ステータス・タイトル獲得データを初期化します。<br/>
+                ※参加者名とHDCP設定は保持されます。
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
@@ -1126,7 +1123,7 @@ function App() {
               <div className="flex items-center justify-between border-b pb-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                   <span>📲</span>
-                  <span>プレイヤー用リンク共有</span>
+                  <span>参加者用リンク共有</span>
                 </h3>
                 <button
                   onClick={() => setShowShareModal(false)}
@@ -1169,7 +1166,7 @@ function App() {
   }
 
   // =========================================================================
-  // VIEW 2: 一般プレイヤー画面（幹事設定ボタン完全非表示）
+  // VIEW 2: 一般プレイヤー画面（URLに ?mode=player がある場合のみ表示）
   // =========================================================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-100 text-slate-900 border-x border-slate-200 shadow-sm flex flex-col pb-8 relative">
@@ -1181,7 +1178,7 @@ function App() {
         </div>
       )}
 
-      {/* --- ヘッダー（幹事ボタンは完全排除） --- */}
+      {/* --- ヘッダー（幹事ボタンは完全非表示） --- */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-3.5 py-2.5 flex items-center justify-between shadow-xs">
         <div>
           <h1 className="text-sm font-black tracking-wide text-emerald-700 flex items-center gap-1.5">
@@ -1237,14 +1234,11 @@ function App() {
         </button>
       </div>
 
-      {/* ========================================================================= */}
       {/* メインタブ 1: スコア入力画面 */}
-      {/* ========================================================================= */}
       {mainTab === 'input' && (
         <div className="flex-1 flex flex-col">
           {/* ホールセレクター: OUT/IN 2段グリッド */}
           <div className="bg-white border-b border-slate-200 p-2 space-y-1 shadow-xs">
-            {/* 上段: OUT */}
             <div className="flex items-center gap-1">
               <span className="text-[10px] font-black text-slate-400 w-7 text-center">OUT</span>
               <div className="grid grid-cols-9 gap-1 flex-1">
@@ -1272,7 +1266,6 @@ function App() {
               </div>
             </div>
 
-            {/* 下段: IN */}
             <div className="flex items-center gap-1">
               <span className="text-[10px] font-black text-slate-400 w-7 text-center">IN</span>
               <div className="grid grid-cols-9 gap-1 flex-1">
@@ -1329,7 +1322,7 @@ function App() {
               )}
             </section>
 
-            {/* タイトルP獲得者セレクター */}
+            {/* タイトル獲得者 */}
             {currentHoleConfig.titleType && (
               <section className="bg-amber-50/70 border border-amber-300 rounded-xl p-3 shadow-xs">
                 <div className="flex items-center justify-between mb-1.5">
@@ -1376,7 +1369,7 @@ function App() {
               </section>
             )}
 
-            {/* プレイヤー入力カードリスト */}
+            {/* プレイヤー入力カード */}
             <section className="space-y-2.5">
               <h2 className="text-xs font-bold text-slate-600 uppercase tracking-wide px-1">
                 スコア・役入力 ({activePlayers.length}名)
@@ -1401,7 +1394,7 @@ function App() {
                     } ${isLocked ? 'opacity-50 pointer-events-none' : ''}`}
                   >
                     <div className="p-3">
-                      {/* 上段：名前・確定/修正ボタン */}
+                      {/* 上段 */}
                       <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
                         <div>
                           <div className="flex items-center gap-1.5">
@@ -1422,7 +1415,6 @@ function App() {
                           </div>
                         </div>
 
-                        {/* 確定／修正ボタン */}
                         {!player.isGhost && (
                           <button
                             onClick={() => toggleScoreCompletion(player.id)}
@@ -1437,11 +1429,10 @@ function App() {
                         )}
                       </div>
 
-                      {/* 確定時はグレーアウト＆操作ロック */}
+                      {/* 確定時はグレーアウト */}
                       <div className={isDone ? 'opacity-40 pointer-events-none select-none' : ''}>
                         {!player.isGhost && (
                           <div className="py-2.5 space-y-2">
-                            {/* 打数ステッパー & パット数ステッパー (初期値2, 0〜9) */}
                             <div className="grid grid-cols-2 gap-3">
                               <div className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-200">
                                 <span className="text-xs font-bold text-slate-700">グロス打数</span>
@@ -1487,7 +1478,6 @@ function App() {
                               </div>
                             </div>
 
-                            {/* 自動判定バッジ */}
                             <div className="flex items-center gap-1.5 text-[10px]">
                               {data.putts === 0 && (
                                 <span className="bg-blue-600 text-white px-2 py-0.5 rounded font-bold shadow-xs">✨ チップイン自動判定 (+2P)</span>
@@ -1504,7 +1494,6 @@ function App() {
 
                         {!player.isGhost && (
                           <div className="pt-2 border-t border-slate-200/80 space-y-2">
-                            {/* ボーナス（青系統） */}
                             <div className="grid grid-cols-2 gap-1.5">
                               <button
                                 onClick={() => updateHoleScore(player.id, 'saoIchi', !data.saoIchi)}
@@ -1528,7 +1517,6 @@ function App() {
                               </button>
                             </div>
 
-                            {/* ペナルティ（赤系統） */}
                             <div className="grid grid-cols-3 gap-1.5">
                               <button
                                 onClick={() => updateHoleScore(player.id, 'ob', !data.ob)}
@@ -1562,7 +1550,6 @@ function App() {
                               </button>
                             </div>
 
-                            {/* 自動救済ボーナス */}
                             {pts.autoBonusP > 0 && (
                               <div className="flex items-center gap-1.5 pt-1 text-[10px] text-emerald-700 font-bold">
                                 <span>✨ 自動救済賞:</span>
@@ -1586,13 +1573,9 @@ function App() {
         </div>
       )}
 
-      {/* ========================================================================= */}
       {/* メインタブ 2: 順位確認画面 */}
-      {/* ========================================================================= */}
       {mainTab === 'rankings' && (
         <div className="flex-1 p-3 space-y-3">
-          
-          {/* 最上部：総合リーダーボード */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <span className="text-xs font-black text-slate-800">総合リーダーボード</span>
@@ -1631,7 +1614,7 @@ function App() {
             </div>
           </div>
 
-          {/* 3大詳細サブタブ切り替えバー */}
+          {/* 3大詳細サブタブ */}
           <div className="bg-white p-1 rounded-xl border border-slate-200 grid grid-cols-3 gap-1 shadow-xs">
             <button
               onClick={() => setRankingSubTab('vegas')}
@@ -1668,7 +1651,7 @@ function App() {
             </button>
           </div>
 
-          {/* サブタブ A: ラスベガスタブ */}
+          {/* ラスベガスタブ */}
           {rankingSubTab === 'vegas' && (
             <div className="space-y-3">
               {holeConfig.map(h => {
@@ -1741,7 +1724,7 @@ function App() {
             </div>
           )}
 
-          {/* サブタブ B: ボーナスタブ */}
+          {/* ボーナスタブ */}
           {rankingSubTab === 'bonus' && (
             <div className="space-y-3">
               {holeConfig.map(h => {
@@ -1805,7 +1788,7 @@ function App() {
             </div>
           )}
 
-          {/* サブタブ C: 個人 (18H明細) タブ */}
+          {/* 個人明細タブ */}
           {rankingSubTab === 'individual' && (() => {
             const targetPlayer = activePlayers.find(p => p.id === selectedIndividualPlayerId) || activePlayers[0];
             const cumStats = calculateAccumulatedStats(18, targetPlayer);
@@ -1824,7 +1807,6 @@ function App() {
 
             return (
               <div className="space-y-3">
-                {/* 1. プレイヤー選択プルダウン */}
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-700">対象プレイヤー:</span>
                   <select
@@ -1838,7 +1820,6 @@ function App() {
                   </select>
                 </div>
 
-                {/* 2. 実績サマリー */}
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
                   <div className="flex items-center justify-between border-b pb-1.5">
                     <span className="text-xs font-black text-slate-800">通算実績サマリー</span>
@@ -1864,7 +1845,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* 3. スタッツ分析 */}
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
                   <span className="text-xs font-black text-slate-800 block border-b pb-1.5">スタッツ分析</span>
                   
@@ -1926,7 +1906,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* 4. 18H累計個数サマリー */}
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
                   <span className="text-xs font-black text-slate-800 block border-b pb-1.5">18H累計個数サマリー</span>
                   
@@ -1989,7 +1968,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* 5. 1H〜18H縦並び詳細明細 */}
                 <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
                   <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-black text-slate-800">
                     全18ホール詳細戦績明細
@@ -2059,7 +2037,7 @@ function App() {
         </div>
       )}
 
-      {/* --- ルール説明 モーダル --- */}
+      {/* ルール説明モーダル */}
       {showRuleModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
