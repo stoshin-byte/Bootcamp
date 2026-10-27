@@ -36,7 +36,6 @@
   import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
   import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-  // 取得いただいたFirebase接続設定を直接設定
   const firebaseConfig = {
     apiKey: "AIzaSyAHY5FtpLE8FCI0fr9oJpOAILoQRIs6Tv4",
     authDomain: "bootcamp-a4d13.firebaseapp.com",
@@ -72,7 +71,6 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useRef } = React;
 
-// --- ラスベガス 上位過半数配当テーブル ---
 const VEGAS_PAYOUT_TABLE = {
   2:  [2],
   3:  [3, 1],
@@ -85,7 +83,6 @@ const VEGAS_PAYOUT_TABLE = {
   10: [5, 4, 3, 2, 1]
 };
 
-// 初期プレイヤー20名（名前は空欄）
 const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
   id: `p${i + 1}`,
   name: '',
@@ -98,24 +95,20 @@ const DEFAULT_PAR3_HOLES = [3, 7, 12, 17];
 const DEFAULT_PAR5_HOLES = [2, 8, 13, 18];
 
 function App() {
-  // 初期表示: URLに ?mode=player がある場合のみプレイヤー画面、通常アクセスはすべて幹事画面
   const [viewMode, setViewMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('mode') === 'player' ? 'player' : 'admin';
   });
 
-  // コンペ識別キー
   const [compId, setCompId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('comp') || 'comp_main_2026';
   });
 
-  // コンペ名
   const [compName, setCompName] = useState(() => {
     return localStorage.getItem(`golf_comp_name_${compId}`) || '第1回 親睦ゴルフコンペ';
   });
 
-  // コンペ履歴リスト [{id, name, date}]
   const [compHistory, setCompHistory] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('golf_comp_history_list') || '[]');
@@ -132,7 +125,6 @@ function App() {
   const [sortField, setSortField] = useState('finalP');
   const [sortAsc, setSortAsc] = useState(false);
 
-  // コンペ設定＆スコア State（初期値はlocalStorageから優先復元）
   const [playerCount, setPlayerCount] = useState(() => {
     const local = localStorage.getItem(`golf_data_${compId}`);
     if (local) {
@@ -186,7 +178,6 @@ function App() {
 
   const [h1RandomOrder, setH1RandomOrder] = useState([]);
 
-  // モーダル・トースト
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [ruleModalTab, setRuleModalTab] = useState(1);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -202,7 +193,6 @@ function App() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // 履歴リストの更新とローカル保存
   const saveToHistory = (id, name) => {
     setCompHistory(prev => {
       const filtered = prev.filter(item => item.id !== id);
@@ -214,7 +204,6 @@ function App() {
     });
   };
 
-  // ホール構成（Par3とPar5の各4ホールから自動生成、残りはPar4）
   const holeConfig = useMemo(() => {
     return Array.from({ length: 18 }, (_, i) => {
       const hNum = i + 1;
@@ -237,7 +226,6 @@ function App() {
     });
   }, [par3Holes, par5Holes]);
 
-  // --- Firebase Firestore リアルタイム同期 ---
   useEffect(() => {
     let unsubscribe = null;
 
@@ -288,9 +276,7 @@ function App() {
     };
   }, [compId]);
 
-  // クラウド保存＆ローカル二重保存（更新しても絶対消えない処理）
   const saveData = async (isManualChange = true) => {
-    // 1. ローカルストレージへ即時保存（オフライン・更新耐性）
     const payload = {
       compName,
       playerCount,
@@ -306,7 +292,6 @@ function App() {
     localStorage.setItem(`golf_comp_name_${compId}`, compName);
     saveToHistory(compId, compName);
 
-    // 2. クラウド同期
     if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) {
       setSyncStatus('local');
       return;
@@ -368,9 +353,18 @@ function App() {
     return false;
   };
 
+  // 生身の参加者が全員そのホールを確定しているか
+  const areAllHumansCompleted = (holeNum) => {
+    const humans = activePlayers.filter(p => !p.isGhost);
+    if (humans.length === 0) return false;
+    return humans.every(p => scores[holeNum]?.[p.id]?.isCompleted === true);
+  };
+
+  // プレイヤー×ホールのスコアデータ取得（ゴーストは生身全員完了時に自動完了）
   const getPlayerScoreData = (holeNum, player) => {
     const par = holeConfig[holeNum - 1].par;
     if (player.isGhost) {
+      const ghostCompleted = areAllHumansCompleted(holeNum);
       return {
         gross: par + 1,
         net: par + 1,
@@ -383,7 +377,7 @@ function App() {
         ob: false,
         water: false,
         bunker: false,
-        isCompleted: true
+        isCompleted: ghostCompleted
       };
     }
 
@@ -414,7 +408,26 @@ function App() {
     };
   };
 
+  // ホール単体ポイント計算（未確定ホールは完全ゼロP）
   const calculateHolePoints = (holeNum, player) => {
+    const d = getPlayerScoreData(holeNum, player);
+
+    // 未確定の場合は一切のポイントを発生させない
+    if (!d.isCompleted) {
+      return {
+        scoreP: 0,
+        bonusP: 0,
+        penP: 0,
+        autoBonusP: 0,
+        totalP: 0,
+        bonusCount: 0,
+        penCount: 0,
+        isBounceBack: false,
+        isObPar: false,
+        breakdown: []
+      };
+    }
+
     if (player.isGhost) {
       return {
         scoreP: 0,
@@ -431,7 +444,6 @@ function App() {
     }
 
     const par = holeConfig[holeNum - 1].par;
-    const d = getPlayerScoreData(holeNum, player);
     const breakdown = [];
 
     const diff = d.net - par;
@@ -498,14 +510,17 @@ function App() {
     let isObPar = false;
 
     if (holeNum > 1) {
-      const prevPar = holeConfig[holeNum - 2].par;
       const prevData = getPlayerScoreData(holeNum - 1, player);
-      const prevDiff = prevData.gross - prevPar;
-      const currDiff = d.gross - par;
-      if (prevDiff >= 2 && currDiff < prevDiff) {
-        autoBonusP += 1;
-        isBounceBack = true;
-        breakdown.push({ label: 'バウンスバック賞', p: 1, type: 'auto' });
+      // 前ホールも確定している場合のみバウンスバック判定
+      if (prevData.isCompleted) {
+        const prevPar = holeConfig[holeNum - 2].par;
+        const prevDiff = prevData.gross - prevPar;
+        const currDiff = d.gross - par;
+        if (prevDiff >= 2 && currDiff < prevDiff) {
+          autoBonusP += 1;
+          isBounceBack = true;
+          breakdown.push({ label: 'バウンスバック賞', p: 1, type: 'auto' });
+        }
       }
     }
     if (d.ob && d.gross === par + 2) {
@@ -529,6 +544,7 @@ function App() {
     };
   };
 
+  // 累計集計（確定済みホールのみを加算）
   const calculateAccumulatedStats = (upToHole, player) => {
     let cumNet = 0, cumGross = 0, cumPutts = 0;
     let cumBonusCount = 0, cumPenCount = 0, cumTotalP = 0;
@@ -542,8 +558,10 @@ function App() {
     let girCount = 0, completedHolesCount = 0, penaltyHolesCount = 0, bunkerHolesCount = 0;
 
     for (let h = 1; h <= upToHole; h++) {
-      const par = holeConfig[h - 1].par;
       const d = getPlayerScoreData(h, player);
+      if (!d.isCompleted) continue; // 未確定ホールは加算しない
+
+      const par = holeConfig[h - 1].par;
       const pts = calculateHolePoints(h, player);
 
       cumNet += d.net;
@@ -557,7 +575,7 @@ function App() {
       cumPenP += pts.penP;
       cumAutoP += pts.autoBonusP;
 
-      if (d.isCompleted) completedHolesCount++;
+      completedHolesCount++;
       if (d.chipIn) chipInCount++;
       if (d.onePat) onePatCount++;
       if (d.saoIchi) saoIchiCount++;
@@ -886,7 +904,6 @@ function App() {
   const handleSelectHistoryComp = (histItem) => {
     setCompId(histItem.id);
     setCompName(histItem.name);
-    // そのコンペのローカル保存があれば復元
     const local = localStorage.getItem(`golf_data_${histItem.id}`);
     if (local) {
       try {
@@ -952,7 +969,7 @@ function App() {
   const currentHoleConfig = holeConfig[currentHole - 1];
 
   // =========================================================================
-  // VIEW 1: 幹事専用ダッシュボード (通常の初期表示)
+  // VIEW 1: 幹事専用ダッシュボード
   // =========================================================================
   if (viewMode === 'admin') {
     return (
@@ -990,7 +1007,6 @@ function App() {
         </header>
 
         <main className="flex-1 p-4 space-y-4">
-          {/* コンペ設定・履歴管理 */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -1050,7 +1066,7 @@ function App() {
             )}
           </div>
 
-          {/* コース設定: Par3 / Par5 各4ホール指定 */}
+          {/* コース設定 */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
             <div>
               <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -1060,7 +1076,6 @@ function App() {
               <p className="text-[10px] text-slate-400 mt-0.5">※指定外の10ホールは自動的にPar4になります。ニアピン・ドラコンも連動します。</p>
             </div>
 
-            {/* Par 3 (ニアピン) */}
             <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
               <span className="text-[11px] font-bold text-amber-900 block">🎯 Par 3 ホール（自動でニアピン対象）</span>
               <div className="grid grid-cols-4 gap-2">
@@ -1079,7 +1094,6 @@ function App() {
               </div>
             </div>
 
-            {/* Par 5 (ドラコン) */}
             <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
               <span className="text-[11px] font-bold text-blue-900 block">🚀 Par 5 ホール（自動でドラコン対象）</span>
               <div className="grid grid-cols-4 gap-2">
@@ -1126,12 +1140,12 @@ function App() {
             {playerCount % 2 !== 0 && (
               <div className="bg-amber-50 border border-amber-300 rounded-lg p-2 text-[11px] text-amber-900 flex items-start gap-1.5 mt-1">
                 <span>👻</span>
-                <span><b>奇数（{playerCount}名）</b>のため、「ゴースト（全Hボギー固定・入力不要）」が自動補完され計{playerCount + 1}名（{Math.ceil(playerCount / 2)}ペア）でラスベガスが進行します。</span>
+                <span><b>奇数（{playerCount}名）</b>のため、「ゴースト（全Hボギー固定・全員確定時に自動完了）」が自動補完され計{playerCount + 1}名（{Math.ceil(playerCount / 2)}ペア）で進行します。</span>
               </div>
             )}
           </div>
 
-          {/* LINE共有ボタン & プレイヤー画面リンク */}
+          {/* 共有 */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-2.5">
             <h2 className="text-xs font-bold text-slate-700 flex items-center gap-1">
               <span>📲</span>
@@ -1236,7 +1250,6 @@ function App() {
           </div>
         </main>
 
-        {/* 新規コンペ作成モーダル */}
         {showNewCompModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -1275,7 +1288,6 @@ function App() {
           </div>
         )}
 
-        {/* スコアリセット確認モーダル */}
         {showResetModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -1305,7 +1317,6 @@ function App() {
           </div>
         )}
 
-        {/* LINE URL共有モーダル */}
         {showShareModal && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -1355,7 +1366,7 @@ function App() {
   }
 
   // =========================================================================
-  // VIEW 2: 一般プレイヤー画面（URLに ?mode=player がある場合のみ表示）
+  // VIEW 2: 一般プレイヤー画面
   // =========================================================================
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-100 text-slate-900 border-x border-slate-200 shadow-sm flex flex-col pb-8 relative">
@@ -1366,7 +1377,6 @@ function App() {
         </div>
       )}
 
-      {/* ヘッダー（コンペ名を表示、幹事ボタンは完全非表示） */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-3.5 py-2.5 flex items-center justify-between shadow-xs">
         <div>
           <h1 className="text-sm font-black tracking-wide text-emerald-700 flex items-center gap-1.5">
@@ -1397,7 +1407,6 @@ function App() {
         </div>
       </header>
 
-      {/* 2大メインタブ */}
       <div className="bg-white border-b border-slate-200 px-3 py-2 grid grid-cols-2 gap-2 shadow-xs">
         <button
           onClick={() => setMainTab('input')}
@@ -1423,7 +1432,6 @@ function App() {
         </button>
       </div>
 
-      {/* メインタブ 1: スコア入力画面 */}
       {mainTab === 'input' && (
         <div className="flex-1 flex flex-col">
           <div className="bg-white border-b border-slate-200 p-2 space-y-1 shadow-xs">
@@ -1584,7 +1592,9 @@ function App() {
                           <div className="flex items-center gap-1.5">
                             <span className={`text-sm font-bold ${isDone ? 'text-slate-600' : 'text-slate-900'}`}>{player.name}</span>
                             {player.isGhost ? (
-                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-bold">全Hボギー固定</span>
+                              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-bold">
+                                {isDone ? '全Hボギー (全員完了により確定)' : '全Hボギー (他プレイヤー完了待ち)'}
+                              </span>
                             ) : player.hdcpVal !== 0 && (
                               <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${player.hdcpVal < 0 ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
                                 HDCP {player.hdcpVal > 0 ? `+${player.hdcpVal}` : player.hdcpVal}
@@ -1756,7 +1766,6 @@ function App() {
         </div>
       )}
 
-      {/* メインタブ 2: 順位確認画面 */}
       {mainTab === 'rankings' && (
         <div className="flex-1 p-3 space-y-3">
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1918,7 +1927,7 @@ function App() {
                         <span className="text-xs font-black text-slate-800">HOLE {holeNum}</span>
                         <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">Par {par}</span>
                       </div>
-                      <span className="text-[10px] text-slate-400">入力完了順リアルタイム反映</span>
+                      <span className="text-[10px] text-slate-400">確定順リアルタイム反映</span>
                     </div>
 
                     <div className="space-y-2">
@@ -1975,14 +1984,14 @@ function App() {
             const totalVegasPts = totalVegasPMap[targetPlayer.id] || 0;
             const finalTotalP = cumStats.cumTotalP + totalVegasPts + totalTitlePts;
 
-            const completedCount = cumStats.completedHolesCount || 1;
-            const avgPutts = (cumStats.cumPutts / completedCount).toFixed(2);
-            const parSaveRate = Math.round(((cumStats.eagleCount + cumStats.birdieCount + cumStats.parCount) / completedCount) * 100);
-            const girRate = Math.round((cumStats.girCount / completedCount) * 100);
-            const obRate = Math.round((cumStats.obCount / completedCount) * 100);
-            const threePattRate = Math.round((cumStats.threePatCount / completedCount) * 100);
-            const penaltyHoleRate = Math.round((cumStats.penaltyHolesCount / completedCount) * 100);
-            const bunkerHoleRate = Math.round((cumStats.bunkerHolesCount / completedCount) * 100);
+            const completedCount = cumStats.completedHolesCount || 0;
+            const avgPutts = completedCount > 0 ? (cumStats.cumPutts / completedCount).toFixed(2) : '-';
+            const parSaveRate = completedCount > 0 ? Math.round(((cumStats.eagleCount + cumStats.birdieCount + cumStats.parCount) / completedCount) * 100) : 0;
+            const girRate = completedCount > 0 ? Math.round((cumStats.girCount / completedCount) * 100) : 0;
+            const obRate = completedCount > 0 ? Math.round((cumStats.obCount / completedCount) * 100) : 0;
+            const threePattRate = completedCount > 0 ? Math.round((cumStats.threePatCount / completedCount) * 100) : 0;
+            const penaltyHoleRate = completedCount > 0 ? Math.round((cumStats.penaltyHolesCount / completedCount) * 100) : 0;
+            const bunkerHoleRate = completedCount > 0 ? Math.round((cumStats.bunkerHolesCount / completedCount) * 100) : 0;
 
             return (
               <div className="space-y-3">
@@ -2174,14 +2183,18 @@ function App() {
                             <div className="flex items-center gap-2">
                               <span className="font-black text-slate-800">Hole {holeNum}</span>
                               <span className="text-[10px] text-slate-500 font-medium">Par {par}</span>
-                              <span className="font-bold text-slate-800">{d.gross}打 (Net {d.net})</span>
-                              <span className="text-[10px] text-slate-400">/{d.putts}パット</span>
+                              <span className="font-bold text-slate-800">
+                                {d.isCompleted ? `${d.gross}打 (Net ${d.net})` : '未完了'}
+                              </span>
+                              {d.isCompleted && (
+                                <span className="text-[10px] text-slate-400">/{d.putts}パット</span>
+                              )}
                             </div>
                             <span className="text-sm font-black text-emerald-700">+{holeFinalP}P</span>
                           </div>
 
                           <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                            <span>ペア: <b>{partner ? partner.name : '-'}</b> {myPair && `(${Math.min(d.net, getPlayerScoreData(holeNum, partner).net)}${Math.max(d.net, getPlayerScoreData(holeNum, partner).net)}点)`}</span>
+                            <span>ペア: <b>{partner ? partner.name : '-'}</b> {myPair && d.isCompleted && getPlayerScoreData(holeNum, partner).isCompleted && `(${Math.min(d.net, getPlayerScoreData(holeNum, partner).net)}${Math.max(d.net, getPlayerScoreData(holeNum, partner).net)}点)`}</span>
                             {vegasHoleP > 0 && <span className="text-emerald-600 font-bold">ベガス +{vegasHoleP}P</span>}
                           </div>
 
@@ -2201,7 +2214,7 @@ function App() {
                               </div>
                             )}
                             {pts.breakdown.length === 0 && titleAwarded === 0 && (
-                              <span className="text-slate-400">P増減内訳なし</span>
+                              <span className="text-slate-400">{d.isCompleted ? 'P増減内訳なし' : 'スコア未入力'}</span>
                             )}
                           </div>
                         </div>
@@ -2216,7 +2229,6 @@ function App() {
         </div>
       )}
 
-      {/* ルール説明モーダル */}
       {showRuleModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
@@ -2269,6 +2281,7 @@ function App() {
                     <p className="text-[11px]">
                       ・奇数人数の場合、自動で「👻 ゴースト」が追加され偶数化。<br/>
                       ・全ホール<b>「ボギー固定（Par+1）」</b>、入力不要。<br/>
+                      ・他の生身プレイヤー全員が確定した時点で自動完了となります。<br/>
                       ・ベガス入賞時は<b>生身のパートナーのみポイント獲得</b>。
                     </p>
                   </div>
