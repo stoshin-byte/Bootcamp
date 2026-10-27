@@ -83,17 +83,18 @@ const VEGAS_PAYOUT_TABLE = {
   10: [5, 4, 3, 2, 1]
 };
 
-const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
-  id: `p${i + 1}`,
+// 枠ごとの初期構造
+const createEmptySlot = (index) => ({
+  id: `p${index + 1}`,
+  masterId: '',
   name: '',
   hdcpVal: 0,
   hdcpScope: 'NONE',
   isGhost: false
-}));
+});
 
-// デフォルトは「-（未設定 = 0）」
-const DEFAULT_PAR3_HOLES = [0, 0, 0, 0];
-const DEFAULT_PAR5_HOLES = [0, 0, 0, 0];
+const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => createEmptySlot(i));
+const DEFAULT_PAR_HOLES = [0, 0, 0, 0];
 
 function App() {
   const [viewMode, setViewMode] = useState(() => {
@@ -116,6 +117,15 @@ function App() {
     } catch {
       return [];
     }
+  });
+
+  // --- 選手マスター名簿 State (全コンペ共通で利用・保持) ---
+  const [playerMaster, setPlayerMaster] = useState(() => {
+    try {
+      const saved = localStorage.getItem('golf_player_master_list');
+      if (saved) return JSON.parse(saved);
+    } catch(e){}
+    return [];
   });
 
   const [mainTab, setMainTab] = useState('input');
@@ -145,17 +155,23 @@ function App() {
   const [par3Holes, setPar3Holes] = useState(() => {
     const local = localStorage.getItem(`golf_data_${compId}`);
     if (local) {
-      try { return JSON.parse(local).par3Holes || DEFAULT_PAR3_HOLES; } catch(e){}
+      try {
+        const d = JSON.parse(local);
+        if (d.par3Holes) return d.par3Holes;
+      } catch(e){}
     }
-    return DEFAULT_PAR3_HOLES;
+    return DEFAULT_PAR_HOLES;
   });
 
   const [par5Holes, setPar5Holes] = useState(() => {
     const local = localStorage.getItem(`golf_data_${compId}`);
     if (local) {
-      try { return JSON.parse(local).par5Holes || DEFAULT_PAR5_HOLES; } catch(e){}
+      try {
+        const d = JSON.parse(local);
+        if (d.par5Holes) return d.par5Holes;
+      } catch(e){}
     }
-    return DEFAULT_PAR5_HOLES;
+    return DEFAULT_PAR_HOLES;
   });
 
   const [currentHole, setCurrentHole] = useState(1);
@@ -179,20 +195,39 @@ function App() {
 
   const [h1RandomOrder, setH1RandomOrder] = useState([]);
 
+  // モーダル State
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [ruleModalTab, setRuleModalTab] = useState(1);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showResetModal, setShowResetModal] = useState(false);
   const [showNewCompModal, setShowNewCompModal] = useState(false);
   const [newCompNameInput, setNewCompNameInput] = useState('');
+  
+  // 選手マスター編集モーダル
+  const [showMasterModal, setShowMasterModal] = useState(false);
+  const [editingMasterPlayer, setEditingMasterPlayer] = useState(null); // null = 新規, object = 編集
+  const [inputLastName, setInputLastName] = useState('');
+  const [inputFirstName, setInputFirstName] = useState('');
+  const [inputDisplayName, setInputDisplayName] = useState('');
+  
   const [toastMessage, setToastMessage] = useState(null);
-
   const isRemoteUpdatingRef = useRef(false);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  // 選手マスター名簿のローカル＆クラウド保存
+  useEffect(() => {
+    localStorage.setItem('golf_player_master_list', JSON.stringify(playerMaster));
+    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB) {
+      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
+        const db = window.__FIREBASE_DB;
+        const ref = fLib.doc(db, 'golf_system', 'player_master');
+        fLib.setDoc(ref, { list: playerMaster, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
+      });
+    }
+  }, [playerMaster]);
 
   const saveToHistory = (id, name) => {
     setCompHistory(prev => {
@@ -205,7 +240,6 @@ function App() {
     });
   };
 
-  // 有効なホール（1〜18）のみを対象にParおよびタイトルを設定（0は「なし」）
   const holeConfig = useMemo(() => {
     const validPar3 = par3Holes.filter(h => h >= 1 && h <= 18);
     const validPar5 = par5Holes.filter(h => h >= 1 && h <= 18);
@@ -231,8 +265,10 @@ function App() {
     });
   }, [par3Holes, par5Holes]);
 
+  // Firestore 同期
   useEffect(() => {
-    let unsubscribe = null;
+    let unsubscribeComp = null;
+    let unsubscribeMaster = null;
 
     const setupSync = () => {
       if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) {
@@ -242,8 +278,9 @@ function App() {
       const db = window.__FIREBASE_DB;
       
       import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        const ref = fLib.doc(db, 'golf_comps', compId);
-        unsubscribe = fLib.onSnapshot(ref, (snap) => {
+        // コンペデータ同期
+        const refComp = fLib.doc(db, 'golf_comps', compId);
+        unsubscribeComp = fLib.onSnapshot(refComp, (snap) => {
           if (snap.exists()) {
             const data = snap.data();
             isRemoteUpdatingRef.current = true;
@@ -262,9 +299,20 @@ function App() {
             saveData(false);
           }
         }, (err) => {
-          console.warn("Firestore onSnapshot error:", err);
+          console.warn("Firestore comp sync error:", err);
           setSyncStatus('error');
         });
+
+        // 選手マスター同期
+        const refMaster = fLib.doc(db, 'golf_system', 'player_master');
+        unsubscribeMaster = fLib.onSnapshot(refMaster, (snap) => {
+          if (snap.exists()) {
+            const mData = snap.data();
+            if (mData.list && Array.isArray(mData.list)) {
+              setPlayerMaster(mData.list);
+            }
+          }
+        }, (err) => console.warn("Master sync error:", err));
       });
     };
 
@@ -276,7 +324,8 @@ function App() {
     }
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribeComp) unsubscribeComp();
+      if (unsubscribeMaster) unsubscribeMaster();
       window.removeEventListener('firebase-ready', setupSync);
     };
   }, [compId]);
@@ -325,12 +374,23 @@ function App() {
     return () => clearTimeout(timer);
   }, [compName, playerCount, players, par3Holes, par5Holes, titleWinners, scores, h1RandomOrder]);
 
+  // マスター名簿に基づき表示名を自動解決
   const activePlayers = useMemo(() => {
-    const raw = players.slice(0, playerCount).map((p, idx) => ({
-      ...p,
-      name: p.name.trim() || `プレイヤー ${idx + 1}`,
-      isGhost: false
-    }));
+    const raw = players.slice(0, playerCount).map((p, idx) => {
+      let displayName = p.name.trim();
+      if (p.masterId) {
+        const m = playerMaster.find(item => item.id === p.masterId);
+        if (m) {
+          displayName = m.displayName?.trim() || m.lastName?.trim() || m.firstName?.trim() || `選手 ${idx + 1}`;
+        }
+      }
+      return {
+        ...p,
+        name: displayName || `プレイヤー ${idx + 1}`,
+        isGhost: false
+      };
+    });
+
     if (playerCount % 2 !== 0) {
       raw.push({
         id: 'ghost_dummy',
@@ -341,7 +401,7 @@ function App() {
       });
     }
     return raw;
-  }, [players, playerCount]);
+  }, [players, playerCount, playerMaster]);
 
   useEffect(() => {
     const ids = activePlayers.map(p => p.id);
@@ -857,11 +917,11 @@ function App() {
   };
 
   const handleHoleChange = (nextHole) => {
-    const currentHoleConfig = holeConfig[currentHole - 1];
-    if (currentHoleConfig.titleType) {
+    const curHConfig = holeConfig[currentHole - 1];
+    if (curHConfig.titleType) {
       const winner = titleWinners[currentHole];
       if (!winner) {
-        showToast(`⚠️ Hole ${currentHole}の${currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者が未入力です`);
+        showToast(`⚠️ Hole ${currentHole}の${curHConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者が未入力です`);
       }
     }
     setCurrentHole(nextHole);
@@ -880,6 +940,7 @@ function App() {
     }
   };
 
+  // --- 新規コンペ作成（タイトルホールはすべて「-」に初期化） ---
   const handleCreateNewComp = () => {
     if (!newCompNameInput.trim()) {
       showToast('コンペ名を入力してください');
@@ -889,6 +950,10 @@ function App() {
     setCompId(newId);
     setCompName(newCompNameInput.trim());
     
+    // タイトルホールをすべて「-（未設定）」へリセット
+    setPar3Holes([0, 0, 0, 0]);
+    setPar5Holes([0, 0, 0, 0]);
+
     const initScores = {};
     for (let h = 1; h <= 18; h++) initScores[h] = {};
     setScores(initScores);
@@ -897,7 +962,7 @@ function App() {
 
     setShowNewCompModal(false);
     setNewCompNameInput('');
-    showToast(`コンペ「${newCompNameInput.trim()}」を作成しました！`);
+    showToast(`新コンペ「${newCompNameInput.trim()}」を作成しました！`);
   };
 
   const handleSelectHistoryComp = (histItem) => {
@@ -931,16 +996,119 @@ function App() {
     showToast('コンペ履歴を削除しました');
   };
 
-  const executeRoundReset = () => {
-    const initScores = {};
-    for (let h = 1; h <= 18; h++) initScores[h] = {};
-    setScores(initScores);
-    setTitleWinners({});
-    setCurrentHole(1);
-    const shuffled = [...activePlayers.map(p => p.id)].sort(() => Math.random() - 0.5);
-    setH1RandomOrder(shuffled);
-    setShowResetModal(false);
-    showToast("🔄 スコアを全リセットし、新ラウンドを開始しました！");
+  // --- 選手マスター管理機能 ---
+  const handleOpenMasterModal = (targetPlayer = null) => {
+    setEditingMasterPlayer(targetPlayer);
+    if (targetPlayer) {
+      setInputLastName(targetPlayer.lastName || '');
+      setInputFirstName(targetPlayer.firstName || '');
+      setInputDisplayName(targetPlayer.displayName || '');
+    } else {
+      setInputLastName('');
+      setInputFirstName('');
+      setInputDisplayName('');
+    }
+    setShowMasterModal(true);
+  };
+
+  const handleSaveMasterPlayer = () => {
+    if (!inputLastName.trim() && !inputFirstName.trim()) {
+      showToast('選手名（姓または名）を入力してください');
+      return;
+    }
+
+    if (editingMasterPlayer) {
+      // 編集更新
+      setPlayerMaster(prev => prev.map(p => {
+        if (p.id === editingMasterPlayer.id) {
+          return {
+            ...p,
+            lastName: inputLastName.trim(),
+            firstName: inputFirstName.trim(),
+            displayName: inputDisplayName.trim()
+          };
+        }
+        return p;
+      }));
+      showToast('選手情報を更新しました');
+    } else {
+      // 新規登録（自動採番 #001〜）
+      const nextNum = playerMaster.length + 1;
+      const formattedId = `m${String(nextNum).padStart(3, '0')}`;
+      const newEntry = {
+        id: formattedId,
+        serial: `#${String(nextNum).padStart(3, '0')}`,
+        lastName: inputLastName.trim(),
+        firstName: inputFirstName.trim(),
+        displayName: inputDisplayName.trim(),
+        lastHdcpVal: 0,
+        lastHdcpScope: 'NONE'
+      };
+      setPlayerMaster(prev => [...prev, newEntry]);
+      showToast(`選手「${newEntry.displayName || newEntry.lastName}」を登録しました！`);
+    }
+    setShowMasterModal(false);
+  };
+
+  const handleDeleteMasterPlayer = (mId) => {
+    if (!confirm('この選手を名簿から削除しますか？（過去のコンペ設定からは解除されます）')) return;
+    setPlayerMaster(prev => prev.filter(p => p.id !== mId));
+    // コンペ側で選ばれていた場合は解除
+    setPlayers(prev => prev.map(p => p.masterId === mId ? { ...p, masterId: '', name: '' } : p));
+    showToast('選手を名簿から削除しました');
+  };
+
+  // コンペ枠への選手アサイン（直前ハンディを自動反映）
+  const handleAssignPlayer = (slotIndex, masterId) => {
+    if (!masterId) {
+      // 解除
+      setPlayers(prev => {
+        const next = [...prev];
+        next[slotIndex] = createEmptySlot(slotIndex);
+        return next;
+      });
+      return;
+    }
+
+    const master = playerMaster.find(m => m.id === masterId);
+    if (!master) return;
+
+    setPlayers(prev => {
+      const next = [...prev];
+      const targetSlot = next[slotIndex];
+      next[slotIndex] = {
+        ...targetSlot,
+        masterId: master.id,
+        name: master.displayName || master.lastName || master.firstName || `選手 ${slotIndex + 1}`,
+        hdcpVal: master.lastHdcpVal !== undefined ? master.lastHdcpVal : 0,
+        hdcpScope: master.lastHdcpScope || 'NONE'
+      };
+      return next;
+    });
+
+    showToast(`「${master.displayName || master.lastName}」を配置し、直前HDCPを自動反映しました`);
+  };
+
+  // ハンディ変更時にマスターの直前ハンディも自動更新
+  const handleUpdateHdcp = (slotIndex, field, value) => {
+    setPlayers(prev => {
+      const next = [...prev];
+      next[slotIndex] = { ...next[slotIndex], [field]: value };
+      
+      const currentMasterId = next[slotIndex].masterId;
+      if (currentMasterId) {
+        setPlayerMaster(mList => mList.map(m => {
+          if (m.id === currentMasterId) {
+            return {
+              ...m,
+              [field === 'hdcpVal' ? 'lastHdcpVal' : 'lastHdcpScope']: value
+            };
+          }
+          return m;
+        }));
+      }
+      return next;
+    });
   };
 
   const getPlayerShareUrl = () => {
@@ -1006,6 +1174,8 @@ function App() {
         </header>
 
         <main className="flex-1 p-4 space-y-4">
+          
+          {/* コンペ基本設定 & 履歴 */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -1034,7 +1204,7 @@ function App() {
             {compHistory.length > 0 && (
               <div className="pt-1">
                 <span className="text-[10px] font-bold text-slate-500 block mb-1">過去のコンペ履歴（タップで切り替え）:</span>
-                <div className="space-y-1 max-h-36 overflow-y-auto">
+                <div className="space-y-1 max-h-32 overflow-y-auto">
                   {compHistory.map(item => (
                     <div
                       key={item.id}
@@ -1061,6 +1231,62 @@ function App() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* 🏌️‍♂️ 選手マスター名簿セクション */}
+          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                  <span>🏌️‍♂️</span>
+                  <span>選手マスター名簿（通算管理）</span>
+                </h2>
+                <span className="text-[10px] text-slate-400 block mt-0.5">登録選手数: {playerMaster.length}名 (自動採番)</span>
+              </div>
+              <button
+                onClick={() => handleOpenMasterModal(null)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-1 rounded shadow-xs"
+              >
+                ＋ 新規選手登録
+              </button>
+            </div>
+
+            {playerMaster.length === 0 ? (
+              <div className="py-4 text-center text-xs text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                まだ選手が登録されていません。<br/>「新規選手登録」からメンバーを追加してください。
+              </div>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                {playerMaster.map(m => {
+                  const displayLabel = m.displayName ? `${m.displayName} (${m.lastName} ${m.firstName})` : `${m.lastName} ${m.firstName}`;
+                  return (
+                    <div key={m.id} className="bg-slate-50 border border-slate-200 rounded-lg p-2 flex items-center justify-between text-xs">
+                      <div className="truncate flex-1">
+                        <span className="font-mono text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-bold mr-1.5">{m.serial}</span>
+                        <span className="font-bold text-slate-800">{displayLabel}</span>
+                        <span className="text-[10px] text-slate-400 ml-2">
+                          直前HDCP: {m.lastHdcpVal > 0 ? `+${m.lastHdcpVal}` : m.lastHdcpVal} ({m.lastHdcpScope === 'ALL' ? '全H' : m.lastHdcpScope === 'PAR4_5' ? 'Par4/5' : m.lastHdcpScope === 'PAR4' ? 'Par4' : 'なし'})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleOpenMasterModal(m)}
+                          className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold px-1"
+                        >
+                          編集
+                        </button>
+                        <button
+                          onClick={() => handleDeleteMasterPlayer(m.id)}
+                          className="text-slate-400 hover:text-red-600 px-1 font-bold text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1170,45 +1396,34 @@ function App() {
             </div>
           </div>
 
-          {/* スコア初期化 */}
-          <div className="bg-red-50/60 border border-red-200 rounded-xl p-3.5 shadow-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xs font-bold text-red-900">🔄 次ラウンド開始（スコアリセット）</h3>
-                <p className="text-[10px] text-slate-500">メンバー名・HDCP設定は維持してスコアのみクリア</p>
-              </div>
-              <button
-                onClick={() => setShowResetModal(true)}
-                className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-xs transition"
-              >
-                リセット
-              </button>
-            </div>
-          </div>
-
-          {/* 参加者・ハンデ設定 */}
+          {/* 参加者・ハンデ設定（名簿からのプルダウン選択式） */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between px-1">
               <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
-                参加者・ハンデ設定 ({playerCount}名)
+                コンペ参加者・ハンデ設定 ({playerCount}名)
               </h2>
-              <span className="text-[10px] text-slate-400">リアルタイム保存中</span>
+              <span className="text-[10px] text-slate-400">名簿から選択</span>
             </div>
 
             {players.slice(0, playerCount).map((p, idx) => (
               <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400 w-12">枠 {idx + 1}</span>
-                  <input
-                    type="text"
-                    placeholder={`プレイヤー ${idx + 1} の名前`}
-                    value={p.name}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, name: val } : item));
-                    }}
-                    className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-800 text-xs flex-1 max-w-[200px] font-semibold focus:outline-none focus:border-emerald-500"
-                  />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-400 w-12 flex-shrink-0">枠 {idx + 1}</span>
+                  
+                  {/* 選手マスターからのプルダウン選択 */}
+                  <select
+                    value={p.masterId || ''}
+                    onChange={(e) => handleAssignPlayer(idx, e.target.value)}
+                    className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-slate-800 text-xs flex-1 font-semibold focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="">-- 選手を選択してください --</option>
+                    {playerMaster.map(m => {
+                      const display = m.displayName ? `${m.serial} ${m.displayName} (${m.lastName} ${m.firstName})` : `${m.serial} ${m.lastName} ${m.firstName}`;
+                      return (
+                        <option key={m.id} value={m.id}>{display}</option>
+                      );
+                    })}
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-100">
@@ -1216,10 +1431,7 @@ function App() {
                     <label className="text-slate-500 block mb-0.5 text-[10px] font-medium">適用ホール</label>
                     <select
                       value={p.hdcpScope}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpScope: val } : item));
-                      }}
+                      onChange={(e) => handleUpdateHdcp(idx, 'hdcpScope', e.target.value)}
                       className="bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-slate-800 w-full text-xs"
                     >
                       <option value="NONE">なし (0)</option>
@@ -1232,10 +1444,7 @@ function App() {
                     <label className="text-slate-500 block mb-0.5 text-[10px] font-medium">HDCP打数 (+1〜-3)</label>
                     <select
                       value={p.hdcpVal}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, hdcpVal: val } : item));
-                      }}
+                      onChange={(e) => handleUpdateHdcp(idx, 'hdcpVal', parseInt(e.target.value, 10))}
                       className="bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-slate-800 w-full text-xs font-semibold"
                     >
                       <option value={1}>+1 (ペナルティ加算)</option>
@@ -1251,6 +1460,79 @@ function App() {
           </div>
         </main>
 
+        {/* 選手マスター編集モーダル */}
+        {showMasterModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3 shadow-xl border border-slate-200">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>🏌️‍♂️</span>
+                  <span>{editingMasterPlayer ? `選手編集 (${editingMasterPlayer.serial})` : '新規選手の登録'}</span>
+                </h3>
+                <button
+                  onClick={() => setShowMasterModal(false)}
+                  className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 block mb-1">姓 (苗字) <span className="text-red-500">*</span></label>
+                    <input
+                      type="text"
+                      value={inputLastName}
+                      onChange={(e) => setInputLastName(e.target.value)}
+                      placeholder="例: 田中"
+                      className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-600 block mb-1">名 (下の名前)</label>
+                    <input
+                      type="text"
+                      value={inputFirstName}
+                      onChange={(e) => setInputFirstName(e.target.value)}
+                      placeholder="例: 太郎"
+                      className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-600 block mb-1">表示名 (任意 / 空欄時は「姓」を表示)</label>
+                  <input
+                    type="text"
+                    value={inputDisplayName}
+                    onChange={(e) => setInputDisplayName(e.target.value)}
+                    placeholder="例: タナショー、田中T など"
+                    className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">※未入力の場合は自動的に苗字（{inputLastName || '姓'}）がスコア表に表示されます。</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t">
+                <button
+                  onClick={() => setShowMasterModal(false)}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-lg text-xs"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleSaveMasterPlayer}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-xs"
+                >
+                  保存する
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 新規コンペ作成モーダル */}
         {showNewCompModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -1269,7 +1551,8 @@ function App() {
                 />
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                ※現在のコンペデータは履歴に保存され、新しいスコア入力枠が作成されます。
+                ※現在のコンペデータは履歴に安全に保存され、新しいスコア入力枠が作成されます。<br/>
+                ※ニアピン・ドラコンの対象ホールは「-（なし）」に初期化されます。
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
@@ -1289,35 +1572,7 @@ function App() {
           </div>
         )}
 
-        {showResetModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
-              <h3 className="text-sm font-bold text-red-600 flex items-center gap-1.5">
-                <span>⚠️</span>
-                <span>スコアリセットの確認</span>
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                全18ホールの入力済みスコア・確定ステータス・タイトル獲得データを初期化します。<br/>
-                ※参加者名とHDCP設定は保持されます。
-              </p>
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <button
-                  onClick={() => setShowResetModal(false)}
-                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-lg text-xs"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={executeRoundReset}
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg text-xs"
-                >
-                  初期化して開始
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
+        {/* LINE URL共有モーダル */}
         {showShareModal && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -2289,7 +2544,7 @@ function App() {
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <h3 className="font-bold text-blue-900 text-xs mb-1">3. 個別ハンディキャップ (HDCP)</h3>
                     <p className="text-[11px]">
-                      ・プレイヤーごとに適用ホールとHDCP値（+1〜-3）を設定。<br/>
+                      ・名簿の選手ごとに直前HDCPが保持され、自動セットされます。<br/>
                       ・<b>完全ネット基準</b>: スコア判定、ベガス打数、順位付けはすべてネット打数を基準とします。
                     </p>
                   </div>
