@@ -83,7 +83,6 @@ const VEGAS_PAYOUT_TABLE = {
   10: [5, 4, 3, 2, 1]
 };
 
-// 枠ごとの初期構造
 const createEmptySlot = (index) => ({
   id: `p${index + 1}`,
   masterId: '',
@@ -119,7 +118,7 @@ function App() {
     }
   });
 
-  // --- 選手マスター名簿 State (全コンペ共通で利用・保持) ---
+  // 選手マスター名簿 State
   const [playerMaster, setPlayerMaster] = useState(() => {
     try {
       const saved = localStorage.getItem('golf_player_master_list');
@@ -157,7 +156,7 @@ function App() {
     if (local) {
       try {
         const d = JSON.parse(local);
-        if (d.par3Holes) return d.par3Holes;
+        if (d.par3Holes && Array.isArray(d.par3Holes)) return d.par3Holes;
       } catch(e){}
     }
     return DEFAULT_PAR_HOLES;
@@ -168,10 +167,31 @@ function App() {
     if (local) {
       try {
         const d = JSON.parse(local);
-        if (d.par5Holes) return d.par5Holes;
+        if (d.par5Holes && Array.isArray(d.par5Holes)) return d.par5Holes;
       } catch(e){}
     }
     return DEFAULT_PAR_HOLES;
+  });
+
+  const [isCompStarted, setIsCompStarted] = useState(() => {
+    const local = localStorage.getItem(`golf_data_${compId}`);
+    if (local) {
+      try { return JSON.parse(local).isCompStarted || false; } catch(e){}
+    }
+    return false;
+  });
+
+  const [h1RandomOrder, setH1RandomOrder] = useState(() => {
+    const local = localStorage.getItem(`golf_data_${compId}`);
+    if (local) {
+      try {
+        const d = JSON.parse(local);
+        if (d.h1RandomOrder && Array.isArray(d.h1RandomOrder) && d.h1RandomOrder.length > 0) {
+          return d.h1RandomOrder;
+        }
+      } catch(e){}
+    }
+    return [];
   });
 
   const [currentHole, setCurrentHole] = useState(1);
@@ -193,8 +213,6 @@ function App() {
     return init;
   });
 
-  const [h1RandomOrder, setH1RandomOrder] = useState([]);
-
   // モーダル State
   const [showRuleModal, setShowRuleModal] = useState(false);
   const [ruleModalTab, setRuleModalTab] = useState(1);
@@ -204,7 +222,7 @@ function App() {
   
   // 選手マスター編集モーダル
   const [showMasterModal, setShowMasterModal] = useState(false);
-  const [editingMasterPlayer, setEditingMasterPlayer] = useState(null); // null = 新規, object = 編集
+  const [editingMasterPlayer, setEditingMasterPlayer] = useState(null);
   const [inputLastName, setInputLastName] = useState('');
   const [inputFirstName, setInputFirstName] = useState('');
   const [inputDisplayName, setInputDisplayName] = useState('');
@@ -278,7 +296,6 @@ function App() {
       const db = window.__FIREBASE_DB;
       
       import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        // コンペデータ同期
         const refComp = fLib.doc(db, 'golf_comps', compId);
         unsubscribeComp = fLib.onSnapshot(refComp, (snap) => {
           if (snap.exists()) {
@@ -289,6 +306,7 @@ function App() {
             if (data.players) setPlayers(data.players);
             if (data.par3Holes) setPar3Holes(data.par3Holes);
             if (data.par5Holes) setPar5Holes(data.par5Holes);
+            if (data.isCompStarted !== undefined) setIsCompStarted(data.isCompStarted);
             if (data.titleWinners) setTitleWinners(data.titleWinners);
             if (data.scores) setScores(data.scores);
             if (data.h1RandomOrder) setH1RandomOrder(data.h1RandomOrder);
@@ -303,7 +321,6 @@ function App() {
           setSyncStatus('error');
         });
 
-        // 選手マスター同期
         const refMaster = fLib.doc(db, 'golf_system', 'player_master');
         unsubscribeMaster = fLib.onSnapshot(refMaster, (snap) => {
           if (snap.exists()) {
@@ -330,17 +347,19 @@ function App() {
     };
   }, [compId]);
 
-  const saveData = async (isManualChange = true) => {
+  const saveData = async (isManualChange = true, extraPayload = {}) => {
     const payload = {
       compName,
       playerCount,
       players,
       par3Holes,
       par5Holes,
+      isCompStarted,
       titleWinners,
       scores,
       h1RandomOrder,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      ...extraPayload
     };
     localStorage.setItem(`golf_data_${compId}`, JSON.stringify(payload));
     localStorage.setItem(`golf_comp_name_${compId}`, compName);
@@ -372,9 +391,8 @@ function App() {
       saveData(true);
     }, 400);
     return () => clearTimeout(timer);
-  }, [compName, playerCount, players, par3Holes, par5Holes, titleWinners, scores, h1RandomOrder]);
+  }, [compName, playerCount, players, par3Holes, par5Holes, isCompStarted, titleWinners, scores, h1RandomOrder]);
 
-  // マスター名簿に基づき表示名を自動解決
   const activePlayers = useMemo(() => {
     const raw = players.slice(0, playerCount).map((p, idx) => {
       let displayName = p.name.trim();
@@ -403,13 +421,14 @@ function App() {
     return raw;
   }, [players, playerCount, playerMaster]);
 
+  // 人数変動時のH1チーム再調整（人数が変わらない限り保持）
   useEffect(() => {
     const ids = activePlayers.map(p => p.id);
     if (h1RandomOrder.length !== ids.length || !h1RandomOrder.every(id => ids.includes(id))) {
       const shuffled = [...ids].sort(() => Math.random() - 0.5);
       setH1RandomOrder(shuffled);
     }
-  }, [activePlayers]);
+  }, [activePlayers.length]);
 
   const isHdcpApplicable = (scope, par) => {
     if (scope === 'ALL') return true;
@@ -940,7 +959,16 @@ function App() {
     }
   };
 
-  // --- 新規コンペ作成（タイトルホールはすべて「-」に初期化） ---
+  // コース設定の全解除（ワンタップで「-」に戻す）
+  const handleClearAllParSettings = () => {
+    if (!confirm('ニアピン・ドラコンの対象ホールをすべて解除（-）にしますか？')) return;
+    setPar3Holes([0, 0, 0, 0]);
+    setPar5Holes([0, 0, 0, 0]);
+    saveData(true, { par3Holes: [0, 0, 0, 0], par5Holes: [0, 0, 0, 0] });
+    showToast('コース設定をすべて「-（未設定）」に解除しました');
+  };
+
+  // 新規コンペ作成（タイトルホールはすべて「-」に初期化＆クラウド確定保存）
   const handleCreateNewComp = () => {
     if (!newCompNameInput.trim()) {
       showToast('コンペ名を入力してください');
@@ -950,9 +978,9 @@ function App() {
     setCompId(newId);
     setCompName(newCompNameInput.trim());
     
-    // タイトルホールをすべて「-（未設定）」へリセット
     setPar3Holes([0, 0, 0, 0]);
     setPar5Holes([0, 0, 0, 0]);
+    setIsCompStarted(false);
 
     const initScores = {};
     for (let h = 1; h <= 18; h++) initScores[h] = {};
@@ -962,6 +990,18 @@ function App() {
 
     setShowNewCompModal(false);
     setNewCompNameInput('');
+
+    // 即座に確定書き込み
+    saveData(true, {
+      compId: newId,
+      compName: newCompNameInput.trim(),
+      par3Holes: [0, 0, 0, 0],
+      par5Holes: [0, 0, 0, 0],
+      isCompStarted: false,
+      scores: initScores,
+      titleWinners: {}
+    });
+
     showToast(`新コンペ「${newCompNameInput.trim()}」を作成しました！`);
   };
 
@@ -976,6 +1016,7 @@ function App() {
         if (d.players) setPlayers(d.players);
         if (d.par3Holes) setPar3Holes(d.par3Holes);
         if (d.par5Holes) setPar5Holes(d.par5Holes);
+        if (d.isCompStarted !== undefined) setIsCompStarted(d.isCompStarted);
         if (d.titleWinners) setTitleWinners(d.titleWinners);
         if (d.scores) setScores(d.scores);
       } catch(e){}
@@ -996,7 +1037,20 @@ function App() {
     showToast('コンペ履歴を削除しました');
   };
 
-  // --- 選手マスター管理機能 ---
+  // 🚀 コンペスタートボタン（1Hチームをロック確定）
+  const handleStartCompetition = () => {
+    const ids = activePlayers.map(p => p.id);
+    let finalOrder = [...h1RandomOrder];
+    if (finalOrder.length !== ids.length || !finalOrder.every(id => ids.includes(id))) {
+      finalOrder = [...ids].sort(() => Math.random() - 0.5);
+      setH1RandomOrder(finalOrder);
+    }
+    setIsCompStarted(true);
+    saveData(true, { isCompStarted: true, h1RandomOrder: finalOrder });
+    showToast("🚀 コンペを開始しました！1番ホールのチームが確定しました。");
+  };
+
+  // 選手マスター管理機能
   const handleOpenMasterModal = (targetPlayer = null) => {
     setEditingMasterPlayer(targetPlayer);
     if (targetPlayer) {
@@ -1018,7 +1072,6 @@ function App() {
     }
 
     if (editingMasterPlayer) {
-      // 編集更新
       setPlayerMaster(prev => prev.map(p => {
         if (p.id === editingMasterPlayer.id) {
           return {
@@ -1032,7 +1085,6 @@ function App() {
       }));
       showToast('選手情報を更新しました');
     } else {
-      // 新規登録（自動採番 #001〜）
       const nextNum = playerMaster.length + 1;
       const formattedId = `m${String(nextNum).padStart(3, '0')}`;
       const newEntry = {
@@ -1051,9 +1103,8 @@ function App() {
   };
 
   const handleDeleteMasterPlayer = (mId) => {
-    if (!confirm('この選手を名簿から削除しますか？（過去のコンペ設定からは解除されます）')) return;
+    if (!confirm('この選手を名簿から削除しますか？（参加枠からも解除されます）')) return;
     setPlayerMaster(prev => prev.filter(p => p.id !== mId));
-    // コンペ側で選ばれていた場合は解除
     setPlayers(prev => prev.map(p => p.masterId === mId ? { ...p, masterId: '', name: '' } : p));
     showToast('選手を名簿から削除しました');
   };
@@ -1061,7 +1112,6 @@ function App() {
   // コンペ枠への選手アサイン（直前ハンディを自動反映）
   const handleAssignPlayer = (slotIndex, masterId) => {
     if (!masterId) {
-      // 解除
       setPlayers(prev => {
         const next = [...prev];
         next[slotIndex] = createEmptySlot(slotIndex);
@@ -1089,7 +1139,6 @@ function App() {
     showToast(`「${master.displayName || master.lastName}」を配置し、直前HDCPを自動反映しました`);
   };
 
-  // ハンディ変更時にマスターの直前ハンディも自動更新
   const handleUpdateHdcp = (slotIndex, field, value) => {
     setPlayers(prev => {
       const next = [...prev];
@@ -1140,7 +1189,7 @@ function App() {
   // =========================================================================
   if (viewMode === 'admin') {
     return (
-      <div className="max-w-md mx-auto min-h-screen bg-white border-x border-slate-200 shadow-sm flex flex-col pb-12">
+      <div className="max-w-md mx-auto min-h-screen bg-white border-x border-slate-200 shadow-sm flex flex-col pb-16">
         {toastMessage && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white text-xs px-4 py-2.5 rounded-full shadow-lg font-bold flex items-center space-x-1">
             <span>{toastMessage}</span>
@@ -1291,14 +1340,23 @@ function App() {
             )}
           </div>
 
-          {/* コース設定: Par3 / Par5 各4ホール指定（「-」選択肢あり・デフォルトは「-」） */}
+          {/* コース設定: Par3 / Par5 各4ホール指定（解除ボタン新設） */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
-            <div>
-              <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                <span>⛳️</span>
-                <span>コース設定（ニアピン・ドラコン対象ホール）</span>
-              </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">※指定したホールがPar3/Par5および対象タイトルになります。「-」は設定なし（通常Par4）です。</p>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                  <span>⛳️</span>
+                  <span>コース設定（ニアピン・ドラコン対象ホール）</span>
+                </h2>
+                <p className="text-[10px] text-slate-400 mt-0.5">※指定したホールがPar3/Par5および対象タイトルになります。「-」は通常Par4です。</p>
+              </div>
+              <button
+                onClick={handleClearAllParSettings}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1 rounded border border-slate-300 transition flex items-center gap-1 flex-shrink-0"
+              >
+                <span>🔄</span>
+                <span>設定をすべて解除（-にする）</span>
+              </button>
             </div>
 
             <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
@@ -1372,30 +1430,6 @@ function App() {
             )}
           </div>
 
-          {/* 共有 */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-2.5">
-            <h2 className="text-xs font-bold text-slate-700 flex items-center gap-1">
-              <span>📲</span>
-              <span>参加者用 URL共有 & 開始</span>
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setShowShareModal(true)}
-                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1 shadow-xs transition"
-              >
-                <span>💬</span>
-                <span>LINEで参加者に送る</span>
-              </button>
-              <button
-                onClick={() => setViewMode('player')}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-1 shadow-xs transition"
-              >
-                <span>🏌️‍♂️</span>
-                <span>スコア入力画面を開く</span>
-              </button>
-            </div>
-          </div>
-
           {/* 参加者・ハンデ設定（名簿からのプルダウン選択式） */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between px-1">
@@ -1410,7 +1444,6 @@ function App() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-bold text-slate-400 w-12 flex-shrink-0">枠 {idx + 1}</span>
                   
-                  {/* 選手マスターからのプルダウン選択 */}
                   <select
                     value={p.masterId || ''}
                     onChange={(e) => handleAssignPlayer(idx, e.target.value)}
@@ -1458,6 +1491,60 @@ function App() {
               </div>
             ))}
           </div>
+
+          {/* 🚀 コンペスタート & アクションセクション */}
+          <div className="bg-white border-2 border-emerald-500 rounded-2xl p-4 shadow-md space-y-3">
+            {!isCompStarted ? (
+              <div className="text-center space-y-2">
+                <span className="text-xs font-bold text-slate-600 block">メンバー・ハンデの準備が整ったらスタート！</span>
+                <button
+                  onClick={handleStartCompetition}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-sm shadow-md transition transform active:scale-98 flex items-center justify-center gap-1.5"
+                >
+                  <span>🚀</span>
+                  <span>コンペをスタートする（1Hチーム確定）</span>
+                </button>
+                <p className="text-[10px] text-slate-400">※スタートを押すと1番ホールのチームが確定し、固定されます。</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">⛳️</span>
+                    <span className="text-xs font-black text-emerald-800">コンペ進行中（1Hチーム確定済）</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (confirm('チームを再抽選してコンペを再スタートしますか？')) {
+                        handleStartCompetition();
+                      }
+                    }}
+                    className="text-[10px] text-slate-400 hover:text-slate-600 underline"
+                  >
+                    再抽選
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setShowShareModal(true)}
+                    className="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs transition"
+                  >
+                    <span>💬</span>
+                    <span>LINEで参加者に送る</span>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('player')}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs transition"
+                  >
+                    <span>🏌️‍♂️</span>
+                    <span>スコア入力画面へ進む</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
         </main>
 
         {/* 選手マスター編集モーダル */}
