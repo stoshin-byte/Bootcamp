@@ -91,8 +91,9 @@ const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => ({
   isGhost: false
 }));
 
-const DEFAULT_PAR3_HOLES = [3, 7, 12, 17];
-const DEFAULT_PAR5_HOLES = [2, 8, 13, 18];
+// デフォルトは「-（未設定 = 0）」
+const DEFAULT_PAR3_HOLES = [0, 0, 0, 0];
+const DEFAULT_PAR5_HOLES = [0, 0, 0, 0];
 
 function App() {
   const [viewMode, setViewMode] = useState(() => {
@@ -204,16 +205,20 @@ function App() {
     });
   };
 
+  // 有効なホール（1〜18）のみを対象にParおよびタイトルを設定（0は「なし」）
   const holeConfig = useMemo(() => {
+    const validPar3 = par3Holes.filter(h => h >= 1 && h <= 18);
+    const validPar5 = par5Holes.filter(h => h >= 1 && h <= 18);
+
     return Array.from({ length: 18 }, (_, i) => {
       const hNum = i + 1;
       let par = 4;
       let titleType = null;
 
-      if (par3Holes.includes(hNum)) {
+      if (validPar3.includes(hNum)) {
         par = 3;
         titleType = 'NEARPIN';
-      } else if (par5Holes.includes(hNum)) {
+      } else if (validPar5.includes(hNum)) {
         par = 5;
         titleType = 'DRACON';
       }
@@ -353,14 +358,12 @@ function App() {
     return false;
   };
 
-  // 生身の参加者が全員そのホールを確定しているか
   const areAllHumansCompleted = (holeNum) => {
     const humans = activePlayers.filter(p => !p.isGhost);
     if (humans.length === 0) return false;
     return humans.every(p => scores[holeNum]?.[p.id]?.isCompleted === true);
   };
 
-  // プレイヤー×ホールのスコアデータ取得（ゴーストは生身全員完了時に自動完了）
   const getPlayerScoreData = (holeNum, player) => {
     const par = holeConfig[holeNum - 1].par;
     if (player.isGhost) {
@@ -408,11 +411,9 @@ function App() {
     };
   };
 
-  // ホール単体ポイント計算（未確定ホールは完全ゼロP）
   const calculateHolePoints = (holeNum, player) => {
     const d = getPlayerScoreData(holeNum, player);
 
-    // 未確定の場合は一切のポイントを発生させない
     if (!d.isCompleted) {
       return {
         scoreP: 0,
@@ -511,7 +512,6 @@ function App() {
 
     if (holeNum > 1) {
       const prevData = getPlayerScoreData(holeNum - 1, player);
-      // 前ホールも確定している場合のみバウンスバック判定
       if (prevData.isCompleted) {
         const prevPar = holeConfig[holeNum - 2].par;
         const prevDiff = prevData.gross - prevPar;
@@ -544,7 +544,6 @@ function App() {
     };
   };
 
-  // 累計集計（確定済みホールのみを加算）
   const calculateAccumulatedStats = (upToHole, player) => {
     let cumNet = 0, cumGross = 0, cumPutts = 0;
     let cumBonusCount = 0, cumPenCount = 0, cumTotalP = 0;
@@ -559,7 +558,7 @@ function App() {
 
     for (let h = 1; h <= upToHole; h++) {
       const d = getPlayerScoreData(h, player);
-      if (!d.isCompleted) continue; // 未確定ホールは加算しない
+      if (!d.isCompleted) continue;
 
       const par = holeConfig[h - 1].par;
       const pts = calculateHolePoints(h, player);
@@ -1066,18 +1065,18 @@ function App() {
             )}
           </div>
 
-          {/* コース設定 */}
+          {/* コース設定: Par3 / Par5 各4ホール指定（「-」選択肢あり・デフォルトは「-」） */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
             <div>
               <h2 className="text-xs font-bold text-slate-800 flex items-center gap-1">
                 <span>⛳️</span>
-                <span>コース設定（Par3・Par5 各4ホール指定）</span>
+                <span>コース設定（ニアピン・ドラコン対象ホール）</span>
               </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">※指定外の10ホールは自動的にPar4になります。ニアピン・ドラコンも連動します。</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">※指定したホールがPar3/Par5および対象タイトルになります。「-」は設定なし（通常Par4）です。</p>
             </div>
 
             <div className="bg-amber-50/60 border border-amber-200 rounded-lg p-2.5 space-y-1.5">
-              <span className="text-[11px] font-bold text-amber-900 block">🎯 Par 3 ホール（自動でニアピン対象）</span>
+              <span className="text-[11px] font-bold text-amber-900 block">🎯 Par 3 ホール（ニアピン対象・最大4枠）</span>
               <div className="grid grid-cols-4 gap-2">
                 {par3Holes.map((hVal, idx) => (
                   <select
@@ -1086,6 +1085,7 @@ function App() {
                     onChange={(e) => handleParSelect('par3', idx, e.target.value)}
                     className="bg-white border border-amber-300 rounded p-1 text-xs font-bold text-slate-800 text-center"
                   >
+                    <option value={0}>- (なし)</option>
                     {Array.from({ length: 18 }, (_, i) => i + 1).map(h => (
                       <option key={h} value={h}>{h}H</option>
                     ))}
@@ -1095,7 +1095,7 @@ function App() {
             </div>
 
             <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-2.5 space-y-1.5">
-              <span className="text-[11px] font-bold text-blue-900 block">🚀 Par 5 ホール（自動でドラコン対象）</span>
+              <span className="text-[11px] font-bold text-blue-900 block">🚀 Par 5 ホール（ドラコン対象・最大4枠）</span>
               <div className="grid grid-cols-4 gap-2">
                 {par5Holes.map((hVal, idx) => (
                   <select
@@ -1104,6 +1104,7 @@ function App() {
                     onChange={(e) => handleParSelect('par5', idx, e.target.value)}
                     className="bg-white border border-blue-300 rounded p-1 text-xs font-bold text-slate-800 text-center"
                   >
+                    <option value={0}>- (なし)</option>
                     {Array.from({ length: 18 }, (_, i) => i + 1).map(h => (
                       <option key={h} value={h}>{h}H</option>
                     ))}
@@ -1223,8 +1224,8 @@ function App() {
                     >
                       <option value="NONE">なし (0)</option>
                       <option value="ALL">全ホール (18H)</option>
-                      <option value="PAR4_5">Par4/5のみ (14H)</option>
-                      <option value="PAR4">Par4のみ (10H)</option>
+                      <option value="PAR4_5">Par4/5のみ</option>
+                      <option value="PAR4">Par4のみ</option>
                     </select>
                   </div>
                   <div>
@@ -2385,8 +2386,9 @@ function App() {
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <h3 className="font-bold text-amber-900 text-xs mb-1">1. 対象ホール & 基本配当</h3>
                     <p className="text-[11px]">
-                      ・ニアピン: 幹事指定のPar3 (4ホール)<br/>
-                      ・ドラコン: 幹事指定のPar5 (4ホール)<br/>
+                      ・ニアピン: 幹事指定のPar3 (最大4ホール)<br/>
+                      ・ドラコン: 幹事指定のPar5 (最大4ホール)<br/>
+                      ・未指定（「-」）の場合はタイトルなし。<br/>
                       ・基本配当: <b>10P</b>（該当なし時は次回へ持ち越し / 上限20P）。
                     </p>
                   </div>
