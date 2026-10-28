@@ -143,7 +143,7 @@ function App() {
     return 'OUT';
   });
 
-  // 選手マスター名簿 State
+  // 選手マスター名簿 State (ローカルキャッシュ & クラウド同期)
   const [playerMaster, setPlayerMaster] = useState(() => {
     try {
       const saved = localStorage.getItem('golf_player_master_list');
@@ -310,9 +310,10 @@ function App() {
     window.history.pushState({}, '', url.toString());
   };
 
+  // クラウド同期: 選手マスター (Firestore golf_system/player_master)
   useEffect(() => {
     localStorage.setItem('golf_player_master_list', JSON.stringify(playerMaster));
-    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB) {
+    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
       import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
         const db = window.__FIREBASE_DB;
         const ref = fLib.doc(db, 'golf_system', 'player_master');
@@ -321,9 +322,22 @@ function App() {
     }
   }, [playerMaster]);
 
+  // クラウド同期: コンペ履歴一覧 (Firestore golf_system/comp_history)
+  useEffect(() => {
+    localStorage.setItem('golf_comp_history_list', JSON.stringify(compHistory));
+    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
+      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
+        const db = window.__FIREBASE_DB;
+        const ref = fLib.doc(db, 'golf_system', 'comp_history');
+        fLib.setDoc(ref, { list: compHistory, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
+      });
+    }
+  }, [compHistory]);
+
+  // クラウド同期: 生涯グロス成績アーカイブ (Firestore golf_system/player_gross_archive)
   useEffect(() => {
     localStorage.setItem('golf_player_gross_archive', JSON.stringify(grossArchive));
-    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB) {
+    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
       import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
         const db = window.__FIREBASE_DB;
         const ref = fLib.doc(db, 'golf_system', 'player_gross_archive');
@@ -336,7 +350,6 @@ function App() {
     setCompHistory(prev => {
       const filtered = prev.filter(item => item.id !== id);
       const updated = [{ id, name: name || '名称未設定コンペ', date: dateStr, startCourse: course }, ...filtered];
-      localStorage.setItem('golf_comp_history_list', JSON.stringify(updated));
       return updated;
     });
   };
@@ -366,10 +379,11 @@ function App() {
     });
   }, [par3Holes, par5Holes]);
 
-  // Firestore 同期
+  // Firestore 双方向リアルタイム同期 (マスター名簿・コンペ履歴・生涯アーカイブ・コンペ本体)
   useEffect(() => {
     let unsubscribeComp = null;
     let unsubscribeMaster = null;
+    let unsubscribeHistory = null;
     let unsubscribeArchive = null;
 
     const setupSync = () => {
@@ -380,6 +394,7 @@ function App() {
       const db = window.__FIREBASE_DB;
       
       import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
+        // 1. 個別コンペ同期
         const refComp = fLib.doc(db, 'golf_comps', compId);
         unsubscribeComp = fLib.onSnapshot(refComp, (snap) => {
           if (snap.exists()) {
@@ -407,23 +422,81 @@ function App() {
           setSyncStatus('error');
         });
 
+        // 2. 選手マスター同期（初回マイグレーション対応）
         const refMaster = fLib.doc(db, 'golf_system', 'player_master');
         unsubscribeMaster = fLib.onSnapshot(refMaster, (snap) => {
           if (snap.exists()) {
             const mData = snap.data();
             if (mData.list && Array.isArray(mData.list)) {
-              setPlayerMaster(mData.list);
+              // ローカルにしか存在しない選手があればマージしてクラウドへ
+              setPlayerMaster(currentLocal => {
+                const cloudList = mData.list;
+                const cloudIds = new Set(cloudList.map(c => c.id));
+                const missingLocal = currentLocal.filter(l => !cloudIds.has(l.id));
+                if (missingLocal.length > 0) {
+                  const merged = [...cloudList, ...missingLocal];
+                  fLib.setDoc(refMaster, { list: merged, updatedAt: Date.now() }, { merge: true }).catch(e => console.warn(e));
+                  return merged;
+                }
+                return cloudList;
+              });
             }
+          } else {
+            // クラウドに未作成の場合、ローカルの名簿をアップロードして初期化
+            setPlayerMaster(currentLocal => {
+              if (currentLocal.length > 0) {
+                fLib.setDoc(refMaster, { list: currentLocal, updatedAt: Date.now() }, { merge: true }).catch(e => console.warn(e));
+              }
+              return currentLocal;
+            });
           }
         }, (err) => console.warn("Master sync error:", err));
 
+        // 3. コンペ履歴リスト同期
+        const refHistory = fLib.doc(db, 'golf_system', 'comp_history');
+        unsubscribeHistory = fLib.onSnapshot(refHistory, (snap) => {
+          if (snap.exists()) {
+            const hData = snap.data();
+            if (hData.list && Array.isArray(hData.list)) {
+              setCompHistory(currentHist => {
+                const cloudIds = new Set(hData.list.map(h => h.id));
+                const missingLocal = currentHist.filter(h => !cloudIds.has(h.id));
+                if (missingLocal.length > 0) {
+                  const merged = [...hData.list, ...missingLocal];
+                  fLib.setDoc(refHistory, { list: merged, updatedAt: Date.now() }, { merge: true }).catch(e => console.warn(e));
+                  return merged;
+                }
+                return hData.list;
+              });
+            }
+          } else {
+            setCompHistory(currentHist => {
+              if (currentHist.length > 0) {
+                fLib.setDoc(refHistory, { list: currentHist, updatedAt: Date.now() }, { merge: true }).catch(e => console.warn(e));
+              }
+              return currentHist;
+            });
+          }
+        }, (err) => console.warn("History sync error:", err));
+
+        // 4. 生涯成績アーカイブ同期
         const refArchive = fLib.doc(db, 'golf_system', 'player_gross_archive');
         unsubscribeArchive = fLib.onSnapshot(refArchive, (snap) => {
           if (snap.exists()) {
             const aData = snap.data();
             if (aData.data) {
-              setGrossArchive(aData.data);
+              setGrossArchive(currentArch => {
+                const merged = { ...currentArch, ...aData.data };
+                return merged;
+              });
             }
+          } else {
+            setGrossArchive(currentArch => {
+              if (Object.keys(currentArch).length > 0) {
+                fLib.setDoc(refArchive, { data: currentArch, updatedAt: Date.now() }, { merge: true }).catch(e => console.warn(e));
+              }
+              return currentArch;
+            });
           }
         }, (err) => console.warn("Archive sync error:", err));
       });
@@ -439,6 +512,7 @@ function App() {
     return () => {
       if (unsubscribeComp) unsubscribeComp();
       if (unsubscribeMaster) unsubscribeMaster();
+      if (unsubscribeHistory) unsubscribeHistory();
       if (unsubscribeArchive) unsubscribeArchive();
       window.removeEventListener('firebase-ready', setupSync);
     };
