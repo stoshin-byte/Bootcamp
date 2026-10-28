@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ゴルフコンペ リアルタイム集計システム</title>
+  <title>ゴルフコンペ リアルタイム集計 ＆ 生涯スタッツ分析システム</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React & ReactDOM CDN -->
+  <!-- React 18 & ReactDOM CDN -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel Standalone for JSX -->
@@ -71,10 +71,11 @@
 <script type="text/babel">
 const { useState, useEffect, useMemo, useRef } = React;
 
+// 更新されたベガス配当テーブル: 2ペア=1P, 3ペア=2P/1P, 4ペア=2P/1P
 const VEGAS_PAYOUT_TABLE = {
-  2:  [2],
-  3:  [3, 1],
-  4:  [3, 1],
+  2:  [1],          // 2ペア(4名): 1位 1P, 2位 0P (引き分け各0.5P)
+  3:  [2, 1],       // 3ペア(5-6名): 1位 2P, 2位 1P, 3位 0P
+  4:  [2, 1],       // 4ペア(7-8名): 1位 2P, 2位 1P, 3-4位 0P
   5:  [3, 2, 1],
   6:  [3, 2, 1],
   7:  [4, 3, 2, 1],
@@ -96,9 +97,12 @@ const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => createEmptySlot(i))
 const DEFAULT_PAR_HOLES = [0, 0, 0, 0];
 
 function App() {
+  // URLパラメータに応じたルーティング判定: ?view=stats または ?mode=player
   const [viewMode, setViewMode] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('mode') === 'player' ? 'player' : 'admin';
+    if (params.get('view') === 'stats') return 'stats';
+    if (params.get('mode') === 'player') return 'player';
+    return 'admin';
   });
 
   const [compId, setCompId] = useState(() => {
@@ -108,6 +112,18 @@ function App() {
 
   const [compName, setCompName] = useState(() => {
     return localStorage.getItem(`golf_comp_name_${compId}`) || '第1回 親睦ゴルフコンペ';
+  });
+
+  const [compDate, setCompDate] = useState(() => {
+    const local = localStorage.getItem(`golf_data_${compId}`);
+    if (local) {
+      try {
+        const d = JSON.parse(local);
+        if (d.compDate) return d.compDate;
+      } catch(e){}
+    }
+    const now = new Date();
+    return `${now.getFullYear()}-${('0'+(now.getMonth()+1)).slice(-2)}-${('0'+now.getDate()).slice(-2)}`;
   });
 
   const [compHistory, setCompHistory] = useState(() => {
@@ -134,6 +150,15 @@ function App() {
       if (saved) return JSON.parse(saved);
     } catch(e){}
     return [];
+  });
+
+  // 生涯グロス成績専用アーカイブ State: { [masterId]: [ { compId, compName, date, holes: { 1: { gross, putts, ... } } } ] }
+  const [grossArchive, setGrossArchive] = useState(() => {
+    try {
+      const saved = localStorage.getItem('golf_player_gross_archive');
+      if (saved) return JSON.parse(saved);
+    } catch(e){}
+    return {};
   });
 
   const [mainTab, setMainTab] = useState('input');
@@ -229,11 +254,20 @@ function App() {
   const [showNewCompModal, setShowNewCompModal] = useState(false);
   const [newCompNameInput, setNewCompNameInput] = useState('');
   const [newCompStartCourse, setNewCompStartCourse] = useState('OUT');
+  const [newCompDateInput, setNewCompDateInput] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${('0'+(now.getMonth()+1)).slice(-2)}-${('0'+now.getDate()).slice(-2)}`;
+  });
   
   // コンペ統合モーダル State
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeCompName, setMergeCompName] = useState('');
   const [selectedMergeCompIds, setSelectedMergeCompIds] = useState([]);
+  const [mergeTitleLimits, setMergeTitleLimits] = useState({});
+  const [mergeSelectedWinners, setMergeSelectedWinners] = useState({});
+
+  // 履歴削除 2択モーダル State
+  const [deleteTargetItem, setDeleteTargetItem] = useState(null);
 
   // 選手マスター編集モーダル
   const [showMasterModal, setShowMasterModal] = useState(false);
@@ -241,6 +275,15 @@ function App() {
   const [inputLastName, setInputLastName] = useState('');
   const [inputFirstName, setInputFirstName] = useState('');
   const [inputDisplayName, setInputDisplayName] = useState('');
+
+  // 生涯スタッツ分析 State (viewMode === 'stats')
+  const [statsFilterMode, setStatsFilterMode] = useState('last5'); // 'last5', 'last10', 'thisYear', 'all', 'custom'
+  const [statsCustomStart, setStatsCustomStart] = useState('');
+  const [statsCustomEnd, setStatsCustomEnd] = useState('');
+  const [statsSelectedMasterId, setStatsSelectedMasterId] = useState('');
+  const [statsVsMasterId, setStatsVsMasterId] = useState('');
+  const [statsSubTab, setStatsSubTab] = useState('individual'); // 'individual', 'vs', 'ranking'
+  const [statsRankingMetric, setStatsRankingMetric] = useState('avgGross'); // 'avgGross', 'avgPutts', 'girRate', 'parSave', 'lowOb', 'sandSave'
   
   const [toastMessage, setToastMessage] = useState(null);
   const isRemoteUpdatingRef = useRef(false);
@@ -248,6 +291,23 @@ function App() {
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // 画面モード切り替えヘルパー (URLパラメータも書き換え)
+  const navigateToView = (mode) => {
+    setViewMode(mode);
+    const url = new URL(window.location.href);
+    if (mode === 'stats') {
+      url.searchParams.set('view', 'stats');
+      url.searchParams.delete('mode');
+    } else if (mode === 'player') {
+      url.searchParams.set('mode', 'player');
+      url.searchParams.delete('view');
+    } else {
+      url.searchParams.delete('view');
+      url.searchParams.delete('mode');
+    }
+    window.history.pushState({}, '', url.toString());
   };
 
   useEffect(() => {
@@ -261,11 +321,20 @@ function App() {
     }
   }, [playerMaster]);
 
-  const saveToHistory = (id, name, course = startCourse) => {
+  useEffect(() => {
+    localStorage.setItem('golf_player_gross_archive', JSON.stringify(grossArchive));
+    if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB) {
+      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
+        const db = window.__FIREBASE_DB;
+        const ref = fLib.doc(db, 'golf_system', 'player_gross_archive');
+        fLib.setDoc(ref, { data: grossArchive, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
+      });
+    }
+  }, [grossArchive]);
+
+  const saveToHistory = (id, name, course = startCourse, dateStr = compDate) => {
     setCompHistory(prev => {
       const filtered = prev.filter(item => item.id !== id);
-      const d = new Date();
-      const dateStr = `${d.getFullYear()}/${('0'+(d.getMonth()+1)).slice(-2)}/${('0'+d.getDate()).slice(-2)}`;
       const updated = [{ id, name: name || '名称未設定コンペ', date: dateStr, startCourse: course }, ...filtered];
       localStorage.setItem('golf_comp_history_list', JSON.stringify(updated));
       return updated;
@@ -301,6 +370,7 @@ function App() {
   useEffect(() => {
     let unsubscribeComp = null;
     let unsubscribeMaster = null;
+    let unsubscribeArchive = null;
 
     const setupSync = () => {
       if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) {
@@ -316,6 +386,7 @@ function App() {
             const data = snap.data();
             isRemoteUpdatingRef.current = true;
             if (data.compName) setCompName(data.compName);
+            if (data.compDate) setCompDate(data.compDate);
             if (data.startCourse) setStartCourse(data.startCourse);
             if (data.playerCount !== undefined) setPlayerCount(data.playerCount);
             if (data.players) setPlayers(data.players);
@@ -327,7 +398,7 @@ function App() {
             if (data.h1RandomOrder) setH1RandomOrder(data.h1RandomOrder);
             setTimeout(() => { isRemoteUpdatingRef.current = false; }, 150);
             setSyncStatus('synced');
-            if (data.compName) saveToHistory(compId, data.compName, data.startCourse || 'OUT');
+            if (data.compName) saveToHistory(compId, data.compName, data.startCourse || 'OUT', data.compDate || compDate);
           } else {
             saveData(false);
           }
@@ -345,6 +416,16 @@ function App() {
             }
           }
         }, (err) => console.warn("Master sync error:", err));
+
+        const refArchive = fLib.doc(db, 'golf_system', 'player_gross_archive');
+        unsubscribeArchive = fLib.onSnapshot(refArchive, (snap) => {
+          if (snap.exists()) {
+            const aData = snap.data();
+            if (aData.data) {
+              setGrossArchive(aData.data);
+            }
+          }
+        }, (err) => console.warn("Archive sync error:", err));
       });
     };
 
@@ -358,13 +439,62 @@ function App() {
     return () => {
       if (unsubscribeComp) unsubscribeComp();
       if (unsubscribeMaster) unsubscribeMaster();
+      if (unsubscribeArchive) unsubscribeArchive();
       window.removeEventListener('firebase-ready', setupSync);
     };
   }, [compId]);
 
+  // スコア更新時に生涯グロスアーカイブを自動同期保存
+  const syncCurrentRoundToGrossArchive = (currentScores, currentPlayers) => {
+    setGrossArchive(prev => {
+      const updated = { ...prev };
+      currentPlayers.forEach(p => {
+        if (!p.masterId && !p.name) return;
+        const key = p.masterId || p.name.trim();
+        const existingList = updated[key] ? [...updated[key]] : [];
+        const filtered = existingList.filter(item => item.compId !== compId);
+
+        // 各ホールのグロス記録を抽出
+        const holeDataMap = {};
+        let completedCount = 0;
+        for (let h = 1; h <= 18; h++) {
+          const s = currentScores[h]?.[p.id];
+          if (s && s.isCompleted) {
+            completedCount++;
+            holeDataMap[h] = {
+              gross: s.gross !== undefined ? s.gross : (holeConfig[h-1].par),
+              putts: s.putts !== undefined ? s.putts : 2,
+              par: holeConfig[h-1].par,
+              ob: s.ob || false,
+              water: s.water || false,
+              bunker: s.bunker || false,
+              sunaIchi: s.sunaIchi || false,
+              saoIchi: s.saoIchi || false
+            };
+          }
+        }
+
+        if (completedCount > 0) {
+          filtered.push({
+            compId,
+            compName,
+            date: compDate,
+            startCourse,
+            completedHoles: completedCount,
+            holes: holeDataMap
+          });
+        }
+
+        updated[key] = filtered;
+      });
+      return updated;
+    });
+  };
+
   const saveData = async (isManualChange = true, extraPayload = {}) => {
     const payload = {
       compName,
+      compDate,
       startCourse,
       playerCount,
       players,
@@ -379,7 +509,9 @@ function App() {
     };
     localStorage.setItem(`golf_data_${compId}`, JSON.stringify(payload));
     localStorage.setItem(`golf_comp_name_${compId}`, compName);
-    saveToHistory(compId, compName, startCourse);
+    saveToHistory(compId, compName, startCourse, compDate);
+
+    syncCurrentRoundToGrossArchive(payload.scores || scores, payload.players || players);
 
     if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) {
       setSyncStatus('local');
@@ -407,7 +539,7 @@ function App() {
       saveData(true);
     }, 400);
     return () => clearTimeout(timer);
-  }, [compName, startCourse, playerCount, players, par3Holes, par5Holes, isCompStarted, titleWinners, scores, h1RandomOrder]);
+  }, [compName, compDate, startCourse, playerCount, players, par3Holes, par5Holes, isCompStarted, titleWinners, scores, h1RandomOrder]);
 
   const activePlayers = useMemo(() => {
     const raw = players.slice(0, playerCount).map((p, idx) => {
@@ -505,7 +637,6 @@ function App() {
     };
   };
 
-  // 前ホール判定 (INスタート組は10Hが初手、1Hの直前は18H)
   const getPreviousHoleNum = (hNum) => {
     if (startCourse === 'IN') {
       if (hNum === 10) return null;
@@ -585,17 +716,17 @@ function App() {
     if (d.ob) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: 'OB', p: -1, type: 'pen' });
+      breakdown.push({ label: 'OB (遭遇)', p: -1, type: 'pen' });
     }
     if (d.water) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: '池', p: -1, type: 'pen' });
+      breakdown.push({ label: '池 (遭遇)', p: -1, type: 'pen' });
     }
     if (d.bunker) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: 'バンカー', p: -1, type: 'pen' });
+      breakdown.push({ label: 'バンカー (遭遇)', p: -1, type: 'pen' });
     }
 
     let autoBonusP = 0;
@@ -785,7 +916,7 @@ function App() {
   const calculateVegasPointsForHole = (holeNum) => {
     const pairs = getHolePairs(holeNum);
     const pairCount = pairs.length;
-    const payoutTable = VEGAS_PAYOUT_TABLE[pairCount] || [3, 2, 1];
+    const payoutTable = VEGAS_PAYOUT_TABLE[pairCount] || [2, 1];
 
     const evaluatedPairs = pairs.map((pair, idx) => {
       const d1 = getPlayerScoreData(holeNum, pair.p1);
@@ -860,21 +991,23 @@ function App() {
       let currentPot = isNearpin ? nearpinCarry : draconCarry;
       currentPot = Math.min(20, currentPot);
 
-      const winnerId = titleWinners[h];
-      holeAwarded[h] = { pot: currentPot, winnerId, awardedPoint: 0, isBlocked: false };
+      const rawWinner = titleWinners[h];
+      const winnersList = Array.isArray(rawWinner) ? rawWinner : (rawWinner && rawWinner !== 'NONE' ? [rawWinner] : []);
 
-      if (!winnerId || winnerId === 'NONE') {
+      holeAwarded[h] = { pot: currentPot, winnersList, awardedMap: {} };
+
+      if (winnersList.length === 0) {
         if (isNearpin) nearpinCarry = Math.min(20, currentPot + 10);
         else draconCarry = Math.min(20, currentPot + 10);
       } else {
-        const currentTotal = playerCumulativeTitle[winnerId] || 0;
-        const availableCap = Math.max(0, 20 - currentTotal);
-        const actualAward = Math.min(currentPot, availableCap);
+        winnersList.forEach(wId => {
+          const currentTotal = playerCumulativeTitle[wId] || 0;
+          const availableCap = Math.max(0, 20 - currentTotal);
+          const actualAward = Math.min(currentPot, availableCap);
 
-        holeAwarded[h].awardedPoint = actualAward;
-        holeAwarded[h].isBlocked = actualAward === 0;
-
-        playerCumulativeTitle[winnerId] = currentTotal + actualAward;
+          holeAwarded[h].awardedMap[wId] = actualAward;
+          playerCumulativeTitle[wId] = currentTotal + actualAward;
+        });
 
         if (isNearpin) nearpinCarry = 10;
         else draconCarry = 10;
@@ -960,7 +1093,7 @@ function App() {
     const curHConfig = holeConfig[currentHole - 1];
     if (curHConfig.titleType) {
       const winner = titleWinners[currentHole];
-      if (!winner) {
+      if (!winner || (Array.isArray(winner) && winner.length === 0)) {
         showToast(`⚠️ Hole ${currentHole}の${curHConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者が未入力です`);
       }
     }
@@ -996,6 +1129,7 @@ function App() {
     const newId = 'comp_' + Date.now();
     setCompId(newId);
     setCompName(newCompNameInput.trim());
+    setCompDate(newCompDateInput);
     setStartCourse(newCompStartCourse);
     
     setPar3Holes([0, 0, 0, 0]);
@@ -1014,6 +1148,7 @@ function App() {
     saveData(true, {
       compId: newId,
       compName: newCompNameInput.trim(),
+      compDate: newCompDateInput,
       startCourse: newCompStartCourse,
       par3Holes: [0, 0, 0, 0],
       par5Holes: [0, 0, 0, 0],
@@ -1028,6 +1163,7 @@ function App() {
   const handleSelectHistoryComp = (histItem) => {
     setCompId(histItem.id);
     setCompName(histItem.name);
+    setCompDate(histItem.date || compDate);
     const local = localStorage.getItem(`golf_data_${histItem.id}`);
     if (local) {
       try {
@@ -1046,17 +1182,46 @@ function App() {
     showToast(`「${histItem.name}」に切り替えました`);
   };
 
-  const handleDeleteHistoryComp = (e, histId) => {
+  const handleRequestDeleteComp = (e, histItem) => {
     e.stopPropagation();
-    if (!confirm('このコンペ履歴を一覧から削除しますか？')) return;
+    setDeleteTargetItem(histItem);
+  };
+
+  const executeDeleteKeepArchive = () => {
+    if (!deleteTargetItem) return;
+    const targetId = deleteTargetItem.id;
     setCompHistory(prev => {
-      const updated = prev.filter(item => item.id !== histId);
+      const updated = prev.filter(item => item.id !== targetId);
       localStorage.setItem('golf_comp_history_list', JSON.stringify(updated));
       return updated;
     });
-    localStorage.removeItem(`golf_data_${histId}`);
-    localStorage.removeItem(`golf_comp_name_${histId}`);
-    showToast('コンペ履歴を削除しました');
+    localStorage.removeItem(`golf_data_${targetId}`);
+    localStorage.removeItem(`golf_comp_name_${targetId}`);
+    setDeleteTargetItem(null);
+    showToast('コンペ一覧から非表示にしました（生涯スコアには維持されます）');
+  };
+
+  const executeDeletePurgeAll = () => {
+    if (!deleteTargetItem) return;
+    const targetId = deleteTargetItem.id;
+    setCompHistory(prev => {
+      const updated = prev.filter(item => item.id !== targetId);
+      localStorage.setItem('golf_comp_history_list', JSON.stringify(updated));
+      return updated;
+    });
+    localStorage.removeItem(`golf_data_${targetId}`);
+    localStorage.removeItem(`golf_comp_name_${targetId}`);
+
+    setGrossArchive(prev => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach(key => {
+        updated[key] = (updated[key] || []).filter(item => item.compId !== targetId);
+      });
+      return updated;
+    });
+
+    setDeleteTargetItem(null);
+    showToast('コンペデータおよび生涯スコアから完全に抹消しました');
   };
 
   const handleStartCompetition = () => {
@@ -1071,23 +1236,107 @@ function App() {
     showToast(`🚀 コンペを開始しました！${startCourse === 'IN' ? '10' : '1'}番ホールのチームが確定しました。`);
   };
 
-  // --- 🔗 コンペ統合（マージ）実行ロジック（最大5つ・重複完全防止） ---
   const handleOpenMergeModal = () => {
     setMergeCompName(`${compName}【総合結果】`);
     setSelectedMergeCompIds([compId]);
+    setMergeTitleLimits({});
+    setMergeSelectedWinners({});
     setShowMergeModal(true);
   };
 
   const handleToggleMergeCompId = (cId) => {
     setSelectedMergeCompIds(prev => {
+      let updated;
       if (prev.includes(cId)) {
-        return prev.filter(id => id !== cId);
+        updated = prev.filter(id => id !== cId);
       } else {
         if (prev.length >= 5) {
           showToast('統合できるコンペは最大5つまでです');
           return prev;
         }
-        return [...prev, cId];
+        updated = [...prev, cId];
+      }
+      return updated;
+    });
+  };
+
+  const mergeTitleCandidates = useMemo(() => {
+    const map = {};
+    holeConfig.forEach(h => {
+      if (h.titleType) map[h.hole] = [];
+    });
+
+    selectedMergeCompIds.forEach(cId => {
+      const raw = localStorage.getItem(`golf_data_${cId}`);
+      if (!raw) return;
+      try {
+        const d = JSON.parse(raw);
+        const compTitleWinners = d.titleWinners || {};
+        const cPlayers = d.players || [];
+        const histItem = compHistory.find(h => h.id === cId);
+        const cLabel = histItem ? histItem.name : cId;
+
+        Object.entries(compTitleWinners).forEach(([holeStr, wVal]) => {
+          const hNum = parseInt(holeStr, 10);
+          if (!map[hNum]) return;
+          const wIds = Array.isArray(wVal) ? wVal : (wVal && wVal !== 'NONE' ? [wVal] : []);
+          wIds.forEach(wId => {
+            const foundP = cPlayers.find(p => p.id === wId);
+            if (foundP) {
+              const uKey = foundP.masterId || foundP.name.trim();
+              map[hNum].push({
+                uniqueKey: uKey,
+                name: foundP.name,
+                compLabel: cLabel,
+                masterId: foundP.masterId
+              });
+            }
+          });
+        });
+      } catch(e){}
+    });
+
+    return map;
+  }, [selectedMergeCompIds, compHistory, holeConfig]);
+
+  useEffect(() => {
+    const initialLimits = {};
+    const initialWinners = {};
+    const groupCount = Math.max(1, selectedMergeCompIds.length);
+
+    Object.keys(mergeTitleCandidates).forEach(holeStr => {
+      const hNum = parseInt(holeStr, 10);
+      const candidates = mergeTitleCandidates[hNum] || [];
+      initialLimits[hNum] = mergeTitleLimits[hNum] !== undefined ? mergeTitleLimits[hNum] : groupCount;
+      const limit = initialLimits[hNum];
+      initialWinners[hNum] = mergeSelectedWinners[hNum] || candidates.slice(0, limit).map(c => c.uniqueKey);
+    });
+
+    setMergeTitleLimits(prev => ({ ...initialLimits, ...prev }));
+    setMergeSelectedWinners(prev => ({ ...initialWinners, ...prev }));
+  }, [mergeTitleCandidates, selectedMergeCompIds.length]);
+
+  const handleLimitChange = (holeNum, newLimit) => {
+    const lim = parseInt(newLimit, 10);
+    setMergeTitleLimits(prev => ({ ...prev, [holeNum]: lim }));
+    setMergeSelectedWinners(prev => {
+      const current = prev[holeNum] || [];
+      return { ...prev, [holeNum]: current.slice(0, lim) };
+    });
+  };
+
+  const handleToggleWinnerSelection = (holeNum, uKey) => {
+    const limit = mergeTitleLimits[holeNum] || 1;
+    setMergeSelectedWinners(prev => {
+      const current = prev[holeNum] || [];
+      if (current.includes(uKey)) {
+        return { ...prev, [holeNum]: current.filter(k => k !== uKey) };
+      } else {
+        if (current.length >= limit) {
+          showToast(`このホールは最大${limit}名まで選択可能です`);
+          return prev;
+        }
+        return { ...prev, [holeNum]: [...current, uKey] };
       }
     });
   };
@@ -1110,7 +1359,8 @@ function App() {
     let refPar3Holes = [0, 0, 0, 0];
     let refPar5Holes = [0, 0, 0, 0];
 
-    const processedKeys = new Set(); // 重複防止用キー（masterId または 名前）
+    const processedKeys = new Set();
+    const keyToNewIdMap = {};
 
     selectedMergeCompIds.forEach(cId => {
       const raw = localStorage.getItem(`golf_data_${cId}`);
@@ -1126,13 +1376,15 @@ function App() {
         cPlayers.forEach(p => {
           if (!p.name && !p.masterId) return;
           const uniqueKey = p.masterId || p.name.trim();
-          if (processedKeys.has(uniqueKey)) return; // 重複スキップ
+          if (processedKeys.has(uniqueKey)) return;
           processedKeys.add(uniqueKey);
 
           const newSlotIndex = mergedPlayers.length;
-          if (newSlotIndex >= 20) return; // 最大20名
+          if (newSlotIndex >= 20) return;
 
           const newPlayerId = `p${newSlotIndex + 1}`;
+          keyToNewIdMap[uniqueKey] = newPlayerId;
+
           mergedPlayers.push({
             id: newPlayerId,
             masterId: p.masterId || '',
@@ -1142,23 +1394,13 @@ function App() {
             isGhost: false
           });
 
-          // スコアの引き継ぎマージ
           for (let h = 1; h <= 18; h++) {
             if (cData.scores?.[h]?.[p.id]) {
               mergedScores[h][newPlayerId] = { ...cData.scores[h][p.id] };
             }
           }
-
-          // タイトル獲得者のマージ
-          for (let h = 1; h <= 18; h++) {
-            if (cData.titleWinners?.[h] === p.id) {
-              mergedTitleWinners[h] = newPlayerId;
-            }
-          }
         });
-      } catch(e){
-        console.warn("Merge parse error:", e);
-      }
+      } catch(e){}
     });
 
     if (mergedPlayers.length === 0) {
@@ -1166,7 +1408,14 @@ function App() {
       return;
     }
 
-    // 20枠の空スロットで埋める
+    Object.entries(mergeSelectedWinners).forEach(([holeStr, uKeys]) => {
+      const hNum = parseInt(holeStr, 10);
+      const mappedNewIds = uKeys.map(k => keyToNewIdMap[k]).filter(Boolean);
+      if (mappedNewIds.length > 0) {
+        mergedTitleWinners[hNum] = mappedNewIds.length === 1 ? mappedNewIds[0] : mappedNewIds;
+      }
+    });
+
     while (mergedPlayers.length < 20) {
       mergedPlayers.push(createEmptySlot(mergedPlayers.length));
     }
@@ -1201,10 +1450,9 @@ function App() {
     });
 
     setShowMergeModal(false);
-    showToast(`🎉 ${finalPlayerCount}名のデータを統合した「${mergeCompName.trim()}」を作成しました！`);
+    showToast(`🎉 タイトルを反映した「${mergeCompName.trim()}」を作成しました！`);
   };
 
-  // 選手マスター管理機能
   const handleOpenMasterModal = (targetPlayer = null) => {
     setEditingMasterPlayer(targetPlayer);
     if (targetPlayer) {
@@ -1338,6 +1586,653 @@ function App() {
   const currentHoleConfig = holeConfig[currentHole - 1];
 
   // =========================================================================
+  // 生涯グロス成績・スタッツ計算ロジック
+  // =========================================================================
+  const calculateLifetimeStats = (targetMasterId, filterMode, customStart, customEnd) => {
+    const allRounds = grossArchive[targetMasterId] || [];
+    const sortedRounds = [...allRounds].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    let targetRounds = sortedRounds;
+    if (filterMode === 'last5') {
+      targetRounds = sortedRounds.slice(0, 5);
+    } else if (filterMode === 'last10') {
+      targetRounds = sortedRounds.slice(0, 10);
+    } else if (filterMode === 'thisYear') {
+      const curYear = new Date().getFullYear();
+      targetRounds = sortedRounds.filter(r => new Date(r.date).getFullYear() === curYear);
+    } else if (filterMode === 'custom' && (customStart || customEnd)) {
+      targetRounds = sortedRounds.filter(r => {
+        const d = new Date(r.date);
+        if (customStart && d < new Date(customStart)) return false;
+        if (customEnd && d > new Date(customEnd)) return false;
+        return true;
+      });
+    }
+
+    let totalGross = 0;
+    let totalPutts = 0;
+    let totalHoles = 0;
+    let outGross = 0, outHoles = 0;
+    let inGross = 0, inHoles = 0;
+
+    let bestRound = null;
+    let worstRound = null;
+
+    let eagleCount = 0, birdieCount = 0, parCount = 0, bogeyCount = 0, doubleBogeyPlusCount = 0;
+    let girCount = 0, parSaveCount = 0, bogeyOnCount = 0;
+
+    let chipInCount = 0, onePattCount = 0, threePattCount = 0;
+    let obHoles = 0, waterHoles = 0, bunkerHoles = 0, sunaIchiCount = 0;
+
+    targetRounds.forEach(rnd => {
+      let rGross = 0;
+      Object.entries(rnd.holes || {}).forEach(([hNumStr, hData]) => {
+        const hNum = parseInt(hNumStr, 10);
+        const gross = hData.gross;
+        const putts = hData.putts;
+        const par = hData.par;
+
+        rGross += gross;
+        totalGross += gross;
+        totalPutts += putts;
+        totalHoles++;
+
+        if (hNum <= 9) {
+          outGross += gross;
+          outHoles++;
+        } else {
+          inGross += gross;
+          inHoles++;
+        }
+
+        const diff = gross - par;
+        if (diff <= -2) eagleCount++;
+        else if (diff === -1) birdieCount++;
+        else if (diff === 0) parCount++;
+        else if (diff === 1) bogeyCount++;
+        else doubleBogeyPlusCount++;
+
+        if (gross - putts <= par - 2) girCount++;
+        if (gross - putts <= par - 1) bogeyOnCount++;
+        if (diff <= 0) parSaveCount++;
+
+        if (putts === 0) chipInCount++;
+        if (putts === 1) onePattCount++;
+        if (putts >= 3) threePattCount++;
+
+        if (hData.ob) obHoles++;
+        if (hData.water) waterHoles++;
+        if (hData.bunker) bunkerHoles++;
+        if (hData.sunaIchi) sunaIchiCount++;
+      });
+
+      if (rnd.completedHoles >= 18) {
+        if (bestRound === null || rGross < bestRound) bestRound = rGross;
+        if (worstRound === null || rGross > worstRound) worstRound = rGross;
+      }
+    });
+
+    const roundCount = targetRounds.length;
+    const avgGross = roundCount > 0 ? (totalGross / (totalHoles / 18)).toFixed(1) : '-';
+    const avgPuttsPerRound = roundCount > 0 ? (totalPutts / (totalHoles / 18)).toFixed(1) : '-';
+    const avgPuttsPerHole = totalHoles > 0 ? (totalPutts / totalHoles).toFixed(2) : '-';
+
+    const avgOut = outHoles > 0 ? ((outGross / outHoles) * 9).toFixed(1) : '-';
+    const avgIn = inHoles > 0 ? ((inGross / inHoles) * 9).toFixed(1) : '-';
+
+    const girRate = totalHoles > 0 ? Math.round((girCount / totalHoles) * 100) : 0;
+    const parSaveRate = totalHoles > 0 ? Math.round((parSaveCount / totalHoles) * 100) : 0;
+    const bogeyOnRate = totalHoles > 0 ? Math.round((bogeyOnCount / totalHoles) * 100) : 0;
+
+    const threePattRate = totalHoles > 0 ? Math.round((threePattCount / totalHoles) * 100) : 0;
+    const onePattRate = totalHoles > 0 ? Math.round((onePattCount / totalHoles) * 100) : 0;
+    const chipInRate = totalHoles > 0 ? ((chipInCount / totalHoles) * 100).toFixed(1) : 0;
+
+    const obHoleRate = totalHoles > 0 ? Math.round((obHoles / totalHoles) * 100) : 0;
+    const waterHoleRate = totalHoles > 0 ? Math.round((waterHoles / totalHoles) * 100) : 0;
+    const bunkerHoleRate = totalHoles > 0 ? Math.round((bunkerHoles / totalHoles) * 100) : 0;
+    const sandSaveRate = bunkerHoles > 0 ? Math.round((sunaIchiCount / bunkerHoles) * 100) : 0;
+
+    return {
+      roundCount,
+      totalHoles,
+      avgGross,
+      bestRound: bestRound !== null ? bestRound : '-',
+      worstRound: worstRound !== null ? worstRound : '-',
+      avgOut,
+      avgIn,
+      avgPuttsPerRound,
+      avgPuttsPerHole,
+      threePattRate,
+      onePattRate,
+      chipInRate,
+      girRate,
+      parSaveRate,
+      bogeyOnRate,
+      eagleCount,
+      birdieCount,
+      parCount,
+      bogeyCount,
+      doubleBogeyPlusCount,
+      obHoleRate,
+      waterHoleRate,
+      bunkerHoleRate,
+      sandSaveRate,
+      rounds: targetRounds
+    };
+  };
+
+  // =========================================================================
+  // VIEW: 生涯グロス成績・スタッツ分析ダッシュボード (viewMode === 'stats')
+  // =========================================================================
+  if (viewMode === 'stats') {
+    const activeMasterList = playerMaster.length > 0 ? playerMaster : [
+      { id: 'm001', serial: '#001', lastName: '登録なし', firstName: '', displayName: 'プレイヤー未登録' }
+    ];
+    const currentMasterId = statsSelectedMasterId || activeMasterList[0].id;
+    const currentStats = calculateLifetimeStats(currentMasterId, statsFilterMode, statsCustomStart, statsCustomEnd);
+    const targetPlayerObj = playerMaster.find(m => m.id === currentMasterId);
+    const currentName = targetPlayerObj ? (targetPlayerObj.displayName || targetPlayerObj.lastName) : '選手';
+
+    const vsMasterId = statsVsMasterId || (activeMasterList.length > 1 ? activeMasterList[1].id : activeMasterList[0].id);
+    const vsStats = calculateLifetimeStats(vsMasterId, statsFilterMode, statsCustomStart, statsCustomEnd);
+    const vsPlayerObj = playerMaster.find(m => m.id === vsMasterId);
+    const vsName = vsPlayerObj ? (vsPlayerObj.displayName || vsPlayerObj.lastName) : '相手選手';
+
+    const rankingData = playerMaster.map(m => {
+      const st = calculateLifetimeStats(m.id, statsFilterMode, statsCustomStart, statsCustomEnd);
+      return {
+        master: m,
+        name: m.displayName || m.lastName,
+        ...st
+      };
+    }).filter(p => p.roundCount > 0);
+
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-slate-100 text-slate-800 border-x border-slate-200 shadow-sm flex flex-col pb-12">
+        <header className="bg-slate-800 text-white px-4 py-3 flex items-center justify-between shadow-xs sticky top-0 z-40">
+          <div>
+            <h1 className="text-sm font-bold flex items-center gap-1.5">
+              <span>📊</span>
+              <span>生涯グロス成績 ＆ スタッツ分析</span>
+            </h1>
+            <p className="text-[10px] text-slate-400">HDCP・P除外 / 純粋グロススタッツ完全特化</p>
+          </div>
+          <button
+            onClick={() => navigateToView('admin')}
+            className="text-xs bg-slate-700 hover:bg-slate-600 text-white font-bold px-3 py-1.5 rounded-lg border border-slate-600 transition"
+          >
+            幹事画面へ ➔
+          </button>
+        </header>
+
+        {/* 期間フィルターバー (初期値: 直近5ラウンド) */}
+        <div className="bg-white border-b border-slate-200 p-2.5 space-y-2 shadow-xs">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
+            <span>集計期間フィルター:</span>
+            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              {statsFilterMode === 'last5' ? '直近5ラウンド (ベース表示)' :
+               statsFilterMode === 'last10' ? '直近10ラウンド' :
+               statsFilterMode === 'thisYear' ? '今年 (2026年)' :
+               statsFilterMode === 'all' ? '全期間 (生涯通算)' : '期間指定'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-5 gap-1 text-[11px] font-bold">
+            <button
+              onClick={() => setStatsFilterMode('last5')}
+              className={`py-1.5 rounded-lg transition border ${statsFilterMode === 'last5' ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+            >
+              直近5R
+            </button>
+            <button
+              onClick={() => setStatsFilterMode('last10')}
+              className={`py-1.5 rounded-lg transition border ${statsFilterMode === 'last10' ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+            >
+              直近10R
+            </button>
+            <button
+              onClick={() => setStatsFilterMode('thisYear')}
+              className={`py-1.5 rounded-lg transition border ${statsFilterMode === 'thisYear' ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+            >
+              今年
+            </button>
+            <button
+              onClick={() => setStatsFilterMode('all')}
+              className={`py-1.5 rounded-lg transition border ${statsFilterMode === 'all' ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+            >
+              全期間
+            </button>
+            <button
+              onClick={() => setStatsFilterMode('custom')}
+              className={`py-1.5 rounded-lg transition border ${statsFilterMode === 'custom' ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+            >
+              期間指定
+            </button>
+          </div>
+
+          {statsFilterMode === 'custom' && (
+            <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
+              <div>
+                <label className="text-[10px] text-slate-400 block">開始日</label>
+                <input
+                  type="date"
+                  value={statsCustomStart}
+                  onChange={(e) => setStatsCustomStart(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-1 text-xs"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block">終了日</label>
+                <input
+                  type="date"
+                  value={statsCustomEnd}
+                  onChange={(e) => setStatsCustomEnd(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-1 text-xs"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* サブタブ切り替え: 個人カルテ / 2人VS比較 / 部門別ランキング */}
+        <div className="bg-slate-200 p-1 mx-3 mt-3 rounded-xl grid grid-cols-3 gap-1 shadow-2xs text-xs font-bold">
+          <button
+            onClick={() => setStatsSubTab('individual')}
+            className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${statsSubTab === 'individual' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'}`}
+          >
+            <span>👤 個人カルテ</span>
+          </button>
+          <button
+            onClick={() => setStatsSubTab('vs')}
+            className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${statsSubTab === 'vs' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'}`}
+          >
+            <span>⚔️ VS 比較</span>
+          </button>
+          <button
+            onClick={() => setStatsSubTab('ranking')}
+            className={`py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${statsSubTab === 'ranking' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'}`}
+          >
+            <span>🏆 部門別王座</span>
+          </button>
+        </div>
+
+        <main className="p-3 space-y-3 flex-1">
+          {/* TAB 1: 個人カルテ */}
+          {statsSubTab === 'individual' && (
+            <div className="space-y-3">
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">対象選手:</span>
+                <select
+                  value={currentMasterId}
+                  onChange={(e) => setStatsSelectedMasterId(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs font-bold text-slate-800"
+                >
+                  {playerMaster.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {m.serial} {m.displayName || `${m.lastName} ${m.firstName}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {currentStats.roundCount === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
+                  指定期間のラウンド履歴データがありません。<br/>コンペでスコアを入力すると自動蓄積されます。
+                </div>
+              ) : (
+                <>
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs space-y-2.5">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <div>
+                        <span className="text-base font-black text-slate-900">{currentName}</span>
+                        <span className="text-[10px] text-slate-400 ml-2">対象: {currentStats.roundCount}ラウンド ({currentStats.totalHoles}ホール)</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-400 block font-medium">平均グロス</span>
+                        <span className="text-xl font-black text-emerald-700">{currentStats.avgGross}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">ベスト</span>
+                        <b className="text-emerald-800 text-sm">{currentStats.bestRound}</b>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">ワースト</span>
+                        <b className="text-red-700 text-sm">{currentStats.worstRound}</b>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">OUT平均</span>
+                        <b className="text-slate-800 text-sm">{currentStats.avgOut}</b>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">IN平均</span>
+                        <b className="text-slate-800 text-sm">{currentStats.avgIn}</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs space-y-2">
+                    <span className="text-xs font-black text-slate-800 block border-b pb-1.5">⛳️ ショット ＆ パット精度</span>
+                    
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="bg-emerald-50/70 p-2 rounded-lg border border-emerald-200">
+                        <span className="text-[10px] text-emerald-900 block font-medium">パーオン率 (GIR)</span>
+                        <b className="text-base text-emerald-950 font-black">{currentStats.girRate}%</b>
+                      </div>
+                      <div className="bg-blue-50/70 p-2 rounded-lg border border-blue-200">
+                        <span className="text-[10px] text-blue-900 block font-medium">パーセーブ率</span>
+                        <b className="text-base text-blue-950 font-black">{currentStats.parSaveRate}%</b>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                        <span className="text-[10px] text-slate-600 block font-medium">ボギーオン率</span>
+                        <b className="text-base text-slate-800 font-black">{currentStats.bogeyOnRate}%</b>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1.5 text-center text-[11px] pt-1">
+                      <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">平均パット(R)</span>
+                        <b className="text-slate-800">{currentStats.avgPuttsPerRound}</b>
+                      </div>
+                      <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">1H平均パット</span>
+                        <b className="text-slate-800">{currentStats.avgPuttsPerHole}</b>
+                      </div>
+                      <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">1パット率</span>
+                        <b className="text-blue-700">{currentStats.onePattRate}%</b>
+                      </div>
+                      <div className="bg-slate-50 p-1.5 rounded border border-slate-100">
+                        <span className="text-[9px] text-slate-400 block">3パット率</span>
+                        <b className="text-red-600">{currentStats.threePattRate}%</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs space-y-2">
+                    <span className="text-xs font-black text-slate-800 block border-b pb-1.5">📊 スコア内訳（期間合計数）</span>
+                    <div className="grid grid-cols-5 gap-1 text-center text-[10px]">
+                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1.5">
+                        <span className="text-emerald-800 block">イーグル+</span>
+                        <b className="text-xs text-emerald-950 font-black">{currentStats.eagleCount}</b>
+                      </div>
+                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1.5">
+                        <span className="text-emerald-800 block">バーディ</span>
+                        <b className="text-xs text-emerald-950 font-black">{currentStats.birdieCount}</b>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1.5">
+                        <span className="text-blue-800 block">パー</span>
+                        <b className="text-xs text-blue-950 font-black">{currentStats.parCount}</b>
+                      </div>
+                      <div className="bg-slate-50 border border-slate-200 rounded p-1.5">
+                        <span className="text-slate-600 block">ボギー</span>
+                        <b className="text-xs text-slate-800 font-black">{currentStats.bogeyCount}</b>
+                      </div>
+                      <div className="bg-red-50 border border-red-200 rounded p-1.5">
+                        <span className="text-red-800 block">ダボ+</span>
+                        <b className="text-xs text-red-950 font-black">{currentStats.doubleBogeyPlusCount}</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl p-3.5 border border-slate-200 shadow-xs space-y-2">
+                    <span className="text-xs font-black text-slate-800 block border-b pb-1.5">⚠️ ハザード遭遇率（ホール率）</span>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="bg-red-50/60 p-2 rounded-lg border border-red-200">
+                        <span className="text-[10px] text-red-900 block font-medium">OB率</span>
+                        <b className="text-red-950 font-black text-sm">{currentStats.obHoleRate}%</b>
+                      </div>
+                      <div className="bg-red-50/60 p-2 rounded-lg border border-red-200">
+                        <span className="text-[10px] text-red-900 block font-medium">池率</span>
+                        <b className="text-red-950 font-black text-sm">{currentStats.waterHoleRate}%</b>
+                      </div>
+                      <div className="bg-amber-50/60 p-2 rounded-lg border border-amber-200">
+                        <span className="text-[10px] text-amber-900 block font-medium">バンカー遭遇率</span>
+                        <b className="text-amber-950 font-black text-sm">{currentStats.bunkerHoleRate}%</b>
+                      </div>
+                      <div className="bg-emerald-50/60 p-2 rounded-lg border border-emerald-200">
+                        <span className="text-[10px] text-emerald-900 block font-medium">砂イチ率</span>
+                        <b className="text-emerald-950 font-black text-sm">{currentStats.sandSaveRate}%</b>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-black text-slate-800">
+                      期間内のラウンド履歴 ({currentStats.rounds.length}戦)
+                    </div>
+                    <div className="divide-y divide-slate-100 text-xs">
+                      {currentStats.rounds.map((rnd, rIdx) => {
+                        let rGross = 0;
+                        let rPutts = 0;
+                        Object.values(rnd.holes || {}).forEach(h => {
+                          rGross += h.gross;
+                          rPutts += h.putts;
+                        });
+                        return (
+                          <div key={rIdx} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                            <div>
+                              <div className="font-bold text-slate-800">{rnd.compName}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                {rnd.date} ({rnd.startCourse}発 / {rnd.completedHoles}H消化)
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-base font-black text-slate-900">{rGross}打</span>
+                              <span className="text-[10px] text-slate-500 block">({rPutts}パット)</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: 2人VS横並び比較 */}
+          {statsSubTab === 'vs' && (
+            <div className="space-y-3">
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-0.5">選手 A</label>
+                  <select
+                    value={currentMasterId}
+                    onChange={(e) => setStatsSelectedMasterId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-1.5 font-bold"
+                  >
+                    {playerMaster.map(m => (
+                      <option key={m.id} value={m.id}>{m.displayName || m.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-0.5">選手 B</label>
+                  <select
+                    value={vsMasterId}
+                    onChange={(e) => setStatsVsMasterId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-1.5 font-bold"
+                  >
+                    {playerMaster.map(m => (
+                      <option key={m.id} value={m.id}>{m.displayName || m.lastName}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <table className="w-full text-xs text-center border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 border-b text-slate-700 font-bold">
+                      <th className="p-2.5 text-left w-1/3">スタッツ項目</th>
+                      <th className="p-2.5 text-emerald-800 bg-emerald-50/60 truncate">{currentName}</th>
+                      <th className="p-2.5 text-blue-800 bg-blue-50/60 truncate">{vsName}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-semibold text-slate-800">
+                    <tr>
+                      <td className="p-2.5 text-left text-slate-500">対象ラウンド数</td>
+                      <td className="p-2.5">{currentStats.roundCount}R</td>
+                      <td className="p-2.5">{vsStats.roundCount}R</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 text-left text-slate-800 font-bold">平均グロス</td>
+                      <td className={`p-2.5 font-black ${parseFloat(currentStats.avgGross) < parseFloat(vsStats.avgGross) ? 'text-emerald-700' : ''}`}>
+                        {currentStats.avgGross}
+                      </td>
+                      <td className={`p-2.5 font-black ${parseFloat(vsStats.avgGross) < parseFloat(currentStats.avgGross) ? 'text-blue-700' : ''}`}>
+                        {vsStats.avgGross}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 text-left text-slate-500">ベストスコア</td>
+                      <td className="p-2.5 font-bold">{currentStats.bestRound}</td>
+                      <td className="p-2.5 font-bold">{vsStats.bestRound}</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 text-left text-slate-800 font-bold">パーオン率 (GIR)</td>
+                      <td className={`p-2.5 font-black ${currentStats.girRate > vsStats.girRate ? 'text-emerald-700' : ''}`}>
+                        {currentStats.girRate}%
+                      </td>
+                      <td className={`p-2.5 font-black ${vsStats.girRate > currentStats.girRate ? 'text-blue-700' : ''}`}>
+                        {vsStats.girRate}%
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 text-left text-slate-500">パーセーブ率</td>
+                      <td className="p-2.5">{currentStats.parSaveRate}%</td>
+                      <td className="p-2.5">{vsStats.parSaveRate}%</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 text-left text-slate-800 font-bold">平均パット (1R)</td>
+                      <td className={`p-2.5 font-black ${parseFloat(currentStats.avgPuttsPerRound) < parseFloat(vsStats.avgPuttsPerRound) ? 'text-emerald-700' : ''}`}>
+                        {currentStats.avgPuttsPerRound}
+                      </td>
+                      <td className={`p-2.5 font-black ${parseFloat(vsStats.avgPuttsPerRound) < parseFloat(currentStats.avgPuttsPerRound) ? 'text-blue-700' : ''}`}>
+                        {vsStats.avgPuttsPerRound}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 text-left text-slate-500">3パット率</td>
+                      <td className="p-2.5 text-red-600">{currentStats.threePattRate}%</td>
+                      <td className="p-2.5 text-red-600">{vsStats.threePattRate}%</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 text-left text-slate-500">OB率 (遭遇)</td>
+                      <td className="p-2.5">{currentStats.obHoleRate}%</td>
+                      <td className="p-2.5">{vsStats.obHoleRate}%</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5 text-left text-slate-500">バンカー遭遇率</td>
+                      <td className="p-2.5">{currentStats.bunkerHoleRate}%</td>
+                      <td className="p-2.5">{vsStats.bunkerHoleRate}%</td>
+                    </tr>
+                    <tr className="bg-slate-50/50">
+                      <td className="p-2.5 text-left text-slate-500">砂イチ率</td>
+                      <td className="p-2.5 font-bold">{currentStats.sandSaveRate}%</td>
+                      <td className="p-2.5 font-bold">{vsStats.sandSaveRate}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: 部門別スタッツランキング */}
+          {statsSubTab === 'ranking' && (
+            <div className="space-y-3">
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs space-y-2">
+                <span className="text-xs font-bold text-slate-700 block">ランキング部門を選択:</span>
+                <div className="grid grid-cols-3 gap-1.5 text-xs font-bold">
+                  {[
+                    { id: 'avgGross', label: '🏌️‍♂️ 平均グロス' },
+                    { id: 'avgPutts', label: '⛳️ 平均パット' },
+                    { id: 'girRate', label: '🎯 パーオン率' },
+                    { id: 'parSave', label: '🛡️ パーセーブ率' },
+                    { id: 'lowOb', label: '🕊️ OB率最小' },
+                    { id: 'sandSave', label: '🏖️ 砂イチ率' },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setStatsRankingMetric(tab.id)}
+                      className={`p-2 rounded-lg border text-center transition ${
+                        statsRankingMetric === tab.id
+                          ? 'bg-emerald-600 border-emerald-700 text-white shadow-xs'
+                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-black text-slate-800 flex items-center justify-between">
+                  <span>リーダーボード</span>
+                  <span className="text-[10px] text-slate-400">対象: {rankingData.length}名</span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {(() => {
+                    const sortedList = [...rankingData].sort((a, b) => {
+                      if (statsRankingMetric === 'avgGross') return parseFloat(a.avgGross) - parseFloat(b.avgGross);
+                      if (statsRankingMetric === 'avgPutts') return parseFloat(a.avgPuttsPerRound) - parseFloat(b.avgPuttsPerRound);
+                      if (statsRankingMetric === 'girRate') return b.girRate - a.girRate;
+                      if (statsRankingMetric === 'parSave') return b.parSaveRate - a.parSaveRate;
+                      if (statsRankingMetric === 'lowOb') return a.obHoleRate - b.obHoleRate;
+                      if (statsRankingMetric === 'sandSave') return b.sandSaveRate - a.sandSaveRate;
+                      return 0;
+                    });
+
+                    if (sortedList.length === 0) {
+                      return (
+                        <div className="p-6 text-center text-xs text-slate-400">
+                          データがまだありません
+                        </div>
+                      );
+                    }
+
+                    return sortedList.map((row, idx) => {
+                      let displayVal = '';
+                      if (statsRankingMetric === 'avgGross') displayVal = `${row.avgGross}打`;
+                      else if (statsRankingMetric === 'avgPutts') displayVal = `${row.avgPuttsPerRound}パット`;
+                      else if (statsRankingMetric === 'girRate') displayVal = `${row.girRate}%`;
+                      else if (statsRankingMetric === 'parSave') displayVal = `${row.parSaveRate}%`;
+                      else if (statsRankingMetric === 'lowOb') displayVal = `${row.obHoleRate}%`;
+                      else if (statsRankingMetric === 'sandSave') displayVal = `${row.sandSaveRate}%`;
+
+                      return (
+                        <div key={row.master.id} className="p-3 flex items-center justify-between hover:bg-slate-50 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-5 text-center font-black ${idx === 0 ? 'text-amber-500 text-sm' : idx === 1 ? 'text-slate-400 text-sm' : idx === 2 ? 'text-amber-700 text-sm' : 'text-slate-400'}`}>
+                              {idx + 1}
+                            </span>
+                            <div>
+                              <span className="font-bold text-slate-800">{row.name}</span>
+                              <span className="text-[10px] text-slate-400 block">{row.roundCount}ラウンド消化</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-base font-black text-emerald-700">{displayVal}</span>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // =========================================================================
   // VIEW 1: 幹事専用ダッシュボード
   // =========================================================================
   if (viewMode === 'admin') {
@@ -1353,7 +2248,7 @@ function App() {
           <div>
             <h1 className="text-base font-bold flex items-center gap-1.5">
               <span>⛳️</span>
-              <span className="truncate max-w-[200px]">{compName || '幹事ダッシュボード'}</span>
+              <span className="truncate max-w-[170px]">{compName || '幹事ダッシュボード'}</span>
             </h1>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
@@ -1361,23 +2256,31 @@ function App() {
                 syncStatus === 'syncing' ? 'bg-amber-500 text-white animate-pulse' :
                 syncStatus === 'local' ? 'bg-slate-700 text-slate-300' : 'bg-red-700 text-white'
               }`}>
-                {syncStatus === 'synced' ? '☁️ クラウド同期完了' :
+                {syncStatus === 'synced' ? '☁️ 同期完了' :
                  syncStatus === 'syncing' ? '🔄 同期中...' :
                  syncStatus === 'local' ? '💾 ローカル保存中' : '⚠️ 同期エラー'}
               </span>
             </div>
           </div>
-          <button
-            onClick={() => setViewMode('player')}
-            className="text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-lg border border-emerald-500 transition shadow-xs"
-          >
-            スコア入力 ➔
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => navigateToView('stats')}
+              className="text-xs bg-slate-800 hover:bg-slate-900 text-white font-bold px-2 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1 shadow-xs"
+            >
+              <span>📊</span>
+              <span>生涯成績</span>
+            </button>
+            <button
+              onClick={() => navigateToView('player')}
+              className="text-xs bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-2.5 py-1.5 rounded-lg border border-emerald-500 transition shadow-xs"
+            >
+              スコア ➔
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 p-4 space-y-4">
           
-          {/* コンペ基本設定 & 履歴 & 🔗統合ボタン */}
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -1401,18 +2304,28 @@ function App() {
               </div>
             </div>
 
-            <div>
-              <label className="text-[10px] font-bold text-slate-500 block mb-1">現在のコンペ名:</label>
-              <input
-                type="text"
-                value={compName}
-                onChange={(e) => setCompName(e.target.value)}
-                placeholder="例: 第1回 親睦ゴルフコンペ"
-                className="bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 w-full focus:outline-none focus:border-emerald-500"
-              />
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">現在のコンペ名:</label>
+                <input
+                  type="text"
+                  value={compName}
+                  onChange={(e) => setCompName(e.target.value)}
+                  placeholder="例: 第1回 親睦ゴルフコンペ"
+                  className="bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 w-full focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-1">開催日:</label>
+                <input
+                  type="date"
+                  value={compDate}
+                  onChange={(e) => setCompDate(e.target.value)}
+                  className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-800 w-full"
+                />
+              </div>
             </div>
 
-            {/* スタートコース（OUT / IN）設定切り替え */}
             <div className="bg-white border border-slate-200 rounded-lg p-2 flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-800 block">スタートホール設定</span>
@@ -1466,7 +2379,7 @@ function App() {
                       <div className="flex items-center gap-2">
                         {item.id === compId && <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.2 rounded">選択中</span>}
                         <button
-                          onClick={(e) => handleDeleteHistoryComp(e, item.id)}
+                          onClick={(e) => handleRequestDeleteComp(e, item)}
                           className="text-slate-400 hover:text-red-600 px-1 font-bold text-xs"
                         >
                           ✕
@@ -1479,7 +2392,6 @@ function App() {
             )}
           </div>
 
-          {/* 🏌️‍♂️ 選手マスター名簿セクション */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div>
@@ -1535,7 +2447,6 @@ function App() {
             )}
           </div>
 
-          {/* コース設定: Par3 / Par5 各4ホール指定（解除ボタン新設） */}
           <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div>
@@ -1550,7 +2461,7 @@ function App() {
                 className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1 rounded border border-slate-300 transition flex items-center gap-1 flex-shrink-0"
               >
                 <span>🔄</span>
-                <span>設定をすべて解除（-にする）</span>
+                <span>設定解除</span>
               </button>
             </div>
 
@@ -1593,7 +2504,6 @@ function App() {
             </div>
           </div>
 
-          {/* 人数設定 */}
           <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
             <div className="flex items-center justify-between">
               <div>
@@ -1625,7 +2535,6 @@ function App() {
             )}
           </div>
 
-          {/* 参加者・ハンデ設定 */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between px-1">
               <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
@@ -1687,7 +2596,6 @@ function App() {
             ))}
           </div>
 
-          {/* 🚀 コンペスタート & アクションセクション */}
           <div className="bg-white border-2 border-emerald-500 rounded-2xl p-4 shadow-md space-y-3">
             {!isCompStarted ? (
               <div className="text-center space-y-2">
@@ -1731,7 +2639,7 @@ function App() {
                     <span>LINEで参加者に送る</span>
                   </button>
                   <button
-                    onClick={() => setViewMode('player')}
+                    onClick={() => navigateToView('player')}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs transition"
                   >
                     <span>🏌️‍♂️</span>
@@ -1744,73 +2652,226 @@ function App() {
 
         </main>
 
-        {/* 🔗 コンペ統合（マージ）モーダル */}
-        {showMergeModal && (
+        {/* 🗑️ 履歴削除の2択モーダル */}
+        {deleteTargetItem && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
               <div className="flex items-center justify-between border-b pb-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                  <span>🔗</span>
-                  <span>成績を反映させてコンペを統合</span>
+                  <span>🗑️</span>
+                  <span>コンペ履歴の削除オプション</span>
                 </h3>
                 <button
-                  onClick={() => setShowMergeModal(false)}
+                  onClick={() => setDeleteTargetItem(null)}
                   className="w-7 h-7 rounded-full bg-slate-100 text-slate-500 text-xs font-bold"
                 >
                   ✕
                 </button>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-1">統合後の新しいコンペ名:</label>
-                <input
-                  type="text"
-                  value={mergeCompName}
-                  onChange={(e) => setMergeCompName(e.target.value)}
-                  placeholder="例: 第1回 親睦コンペ【総合結果】"
-                  className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
-                />
+              <div className="text-xs text-slate-700 space-y-1">
+                <p className="font-bold text-slate-900">対象: {deleteTargetItem.name}</p>
+                <p className="text-[11px] text-slate-500">日付: {deleteTargetItem.date} ({deleteTargetItem.startCourse || 'OUT'}発)</p>
+                <p className="pt-1">このコンペのデータをどのように処理しますか？</p>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-1">
-                  統合するコンペを選択（最大5つまで / 選択中: {selectedMergeCompIds.length}組）:
-                </label>
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-0.5">
-                  {compHistory.map(hist => {
-                    const isChecked = selectedMergeCompIds.includes(hist.id);
-                    return (
-                      <div
-                        key={hist.id}
-                        onClick={() => handleToggleMergeCompId(hist.id)}
-                        className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition ${
-                          isChecked
-                            ? 'bg-indigo-50 border-indigo-400 font-bold text-indigo-950'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {}}
-                            className="rounded text-indigo-600 focus:ring-0"
-                          />
-                          <span className="text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono">{hist.startCourse || 'OUT'}</span>
-                          <span className="truncate">{hist.name}</span>
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={executeDeleteKeepArchive}
+                  className="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl p-3 text-left transition"
+                >
+                  <div className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                    <span>📁</span>
+                    <span>一覧から非表示（生涯スコアには残す）</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 leading-normal">
+                    幹事画面の履歴一覧からのみ非表示にします。プレイヤーの生涯グロススタッツにはこの記録が維持されます。（画面整理用）
+                  </p>
+                </button>
+
+                <button
+                  onClick={executeDeletePurgeAll}
+                  className="w-full bg-red-50 hover:bg-red-100 border border-red-300 rounded-xl p-3 text-left transition"
+                >
+                  <div className="text-xs font-bold text-red-800 flex items-center gap-1">
+                    <span>💥</span>
+                    <span>完全削除（生涯スコアからも抹消）</span>
+                  </div>
+                  <p className="text-[10px] text-red-600 mt-1 leading-normal">
+                    コンペ一覧および生涯成績の集計対象からも完全に抹消します。（テスト入力や誤入力のリセット用）
+                  </p>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setDeleteTargetItem(null)}
+                className="w-full py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-lg text-xs"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 🔗 コンペ統合モーダル */}
+        {showMergeModal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3">
+            <div className="bg-white rounded-2xl max-w-sm w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+              <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>🔗</span>
+                  <span>成績を反映させてコンペを統合</span>
+                </h3>
+                <button
+                  onClick={() => setShowMergeModal(false)}
+                  className="w-7 h-7 rounded-full bg-slate-200 text-slate-600 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3.5 overflow-y-auto space-y-3.5 text-xs text-slate-700">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-600 block mb-1">統合後の新しいコンペ名:</label>
+                  <input
+                    type="text"
+                    value={mergeCompName}
+                    onChange={(e) => setMergeCompName(e.target.value)}
+                    placeholder="例: 第1回 親睦コンペ【総合結果】"
+                    className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                    統合するコンペを選択（最大5つまで / 選択中: {selectedMergeCompIds.length}組）:
+                  </label>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-0.5">
+                    {compHistory.map(hist => {
+                      const isChecked = selectedMergeCompIds.includes(hist.id);
+                      return (
+                        <div
+                          key={hist.id}
+                          onClick={() => handleToggleMergeCompId(hist.id)}
+                          className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition ${
+                            isChecked
+                              ? 'bg-indigo-50 border-indigo-400 font-bold text-indigo-950'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              className="rounded text-indigo-600 focus:ring-0"
+                            />
+                            <span className="text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono">{hist.startCourse || 'OUT'}</span>
+                            <span className="truncate">{hist.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-normal">{hist.date}</span>
                         </div>
-                        <span className="text-[10px] text-slate-400 font-normal">{hist.date}</span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-indigo-950 flex items-center gap-1">
+                      <span>🏆</span>
+                      <span>タイトル受賞者枠数＆保持者選択</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400">ホールごとに選択</span>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    各組で入力された獲得者の中から、総合コンペで採用する人数とプレイヤーを選んでください。
+                  </p>
+
+                  <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                    {holeConfig.filter(h => h.titleType !== null).map(hConfig => {
+                      const hNum = hConfig.hole;
+                      const titleName = hConfig.titleType === 'NEARPIN' ? '🎯 ニアピン' : '🚀 ドラコン';
+                      const candidates = mergeTitleCandidates[hNum] || [];
+                      const limit = mergeTitleLimits[hNum] || 1;
+                      const selectedKeys = mergeSelectedWinners[hNum] || [];
+                      const maxPossibleLimit = Math.max(1, selectedMergeCompIds.length);
+
+                      return (
+                        <div key={hNum} className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                          <div className="flex items-center justify-between border-b pb-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-slate-800">Hole {hNum}</span>
+                              <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.2 rounded">
+                                {titleName}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-slate-500 font-medium">採用枠数:</span>
+                              <select
+                                value={limit}
+                                onChange={(e) => handleLimitChange(hNum, e.target.value)}
+                                className="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-slate-800"
+                              >
+                                {Array.from({ length: maxPossibleLimit }, (_, i) => i + 1).map(num => (
+                                  <option key={num} value={num}>{num}名</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {candidates.length === 0 ? (
+                            <div className="text-[10px] text-slate-400 py-1 text-center">
+                              各組での該当者なし（持ち越し設定等）
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <span className="text-[9px] text-slate-400 block font-medium">
+                                各組の獲得者（タップして{limit}名まで選択）:
+                              </span>
+                              <div className="space-y-1">
+                                {candidates.map((cand, cIdx) => {
+                                  const isSelected = selectedKeys.includes(cand.uniqueKey);
+                                  return (
+                                    <div
+                                      key={cIdx}
+                                      onClick={() => handleToggleWinnerSelection(hNum, cand.uniqueKey)}
+                                      className={`p-1.5 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition ${
+                                        isSelected
+                                          ? 'bg-amber-50 border-amber-400 font-bold text-amber-950 shadow-2xs'
+                                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-1.5 truncate">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => {}}
+                                          className="rounded text-amber-600 focus:ring-0"
+                                        />
+                                        <span className="font-bold">{cand.name}</span>
+                                        <span className="text-[9px] text-slate-400 truncate">({cand.compLabel})</span>
+                                      </div>
+                                      {isSelected && (
+                                        <span className="text-[9px] bg-amber-500 text-white font-bold px-1.5 py-0.2 rounded">
+                                          受賞 ✓
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-indigo-50/70 p-2.5 rounded-lg border border-indigo-200 text-[10px] text-indigo-900 leading-relaxed">
-                💡 各組で入力されたスコア・HDCP・獲得ポイント（ベガス含む）を個人ごとに統合し、同一人物の重複は自動排除されます。
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t">
+              <div className="p-3 bg-slate-50 border-t border-slate-200 grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setShowMergeModal(false)}
                   className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-lg text-xs"
@@ -1920,6 +2981,16 @@ function App() {
               </div>
 
               <div>
+                <label className="text-xs text-slate-600 block mb-1">開催日:</label>
+                <input
+                  type="date"
+                  value={newCompDateInput}
+                  onChange={(e) => setNewCompDateInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold text-slate-800"
+                />
+              </div>
+
+              <div>
                 <label className="text-xs text-slate-600 block mb-1">スタートコース:</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -2019,7 +3090,7 @@ function App() {
   }
 
   // =========================================================================
-  // VIEW 2: 一般プレイヤー画面 (INスタート時は10〜18Hを上段に表示)
+  // VIEW 2: 一般プレイヤー画面
   // =========================================================================
   const outHoles = holeConfig.slice(0, 9);
   const inHoles = holeConfig.slice(9, 18);
@@ -2041,7 +3112,7 @@ function App() {
         <div>
           <h1 className="text-sm font-black tracking-wide text-emerald-700 flex items-center gap-1.5">
             <span>⛳️</span>
-            <span className="truncate max-w-[170px]">{compName || 'ゴルフコンペ'}</span>
+            <span className="truncate max-w-[160px]">{compName || 'ゴルフコンペ'}</span>
             <span className="text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono font-bold">
               {startCourse}発
             </span>
@@ -2056,13 +3127,20 @@ function App() {
             </span>
           </h1>
           <p className="text-[10px] text-slate-500">
-            {playerCount}名{playerCount % 2 !== 0 && ' (+👻ゴースト)'} / {Math.ceil(activePlayers.length / 2)}ペア
+            {compDate} / {playerCount}名{playerCount % 2 !== 0 && ' (+👻ゴースト)'}
           </p>
         </div>
         <div className="flex items-center space-x-1.5">
           <button
+            onClick={() => navigateToView('stats')}
+            className="text-[11px] bg-slate-800 hover:bg-slate-900 text-white px-2 py-1.5 rounded-lg flex items-center gap-1 font-bold transition shadow-xs"
+          >
+            <span>📊</span>
+            <span>生涯成績</span>
+          </button>
+          <button
             onClick={() => setShowRuleModal(true)}
-            className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-bold transition"
+            className="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1.5 rounded-lg flex items-center gap-1 font-bold transition"
           >
             <span>📖</span>
             <span>ルール</span>
@@ -2097,7 +3175,6 @@ function App() {
 
       {mainTab === 'input' && (
         <div className="flex-1 flex flex-col">
-          {/* ホール切り替えバー（スタートコースに合わせて上段・下段を自動反転） */}
           <div className="bg-white border-b border-slate-200 p-2 space-y-1 shadow-xs">
             <div className="flex items-center gap-1">
               <span className="text-[10px] font-black text-slate-400 w-7 text-center">{topRowLabel}</span>
@@ -2192,7 +3269,7 @@ function App() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <select
-                    value={titleWinners[currentHole] || ''}
+                    value={Array.isArray(titleWinners[currentHole]) ? titleWinners[currentHole][0] || '' : (titleWinners[currentHole] || '')}
                     onChange={(e) => setTitleWinners(prev => ({ ...prev, [currentHole]: e.target.value }))}
                     className="bg-white border border-amber-400 rounded-lg text-xs px-2 py-1.5 text-slate-800 focus:outline-none"
                   >
@@ -2214,10 +3291,14 @@ function App() {
                     ) : titleWinners[currentHole] ? (
                       (() => {
                         const wInfo = titlePointsSummary.holeAwarded[currentHole];
-                        if (wInfo?.isBlocked) {
+                        const winnerIds = wInfo?.winnersList || [];
+                        if (winnerIds.length === 0) return <span className="text-slate-400 font-normal">未選択</span>;
+                        const pointsAwarded = winnerIds.map(id => wInfo.awardedMap[id] || 0);
+                        const allZero = pointsAwarded.every(p => p === 0);
+                        if (allZero) {
                           return <span className="text-red-600">🛑 上限20P到達のため+0P (消滅)</span>;
                         }
-                        return <span className="text-emerald-700">🎉 +{wInfo?.awardedPoint}P 獲得確定！</span>;
+                        return <span className="text-emerald-700">🎉 {winnerIds.length}名 獲得確定！</span>;
                       })()
                     ) : (
                       <span className="text-slate-400 font-normal">未選択</span>
@@ -2381,7 +3462,7 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                OB -1
+                                OB -1 (遭遇)
                               </button>
                               <button
                                 onClick={() => updateHoleScore(player.id, 'water', !data.water)}
@@ -2391,7 +3472,7 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                池 -1
+                                池 -1 (遭遇)
                               </button>
                               <button
                                 onClick={() => updateHoleScore(player.id, 'bunker', !data.bunker)}
@@ -2401,7 +3482,7 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                バンカー -1
+                                バンカー -1 (遭遇)
                               </button>
                             </div>
 
@@ -2647,15 +3728,6 @@ function App() {
             const totalVegasPts = totalVegasPMap[targetPlayer.id] || 0;
             const finalTotalP = cumStats.cumTotalP + totalVegasPts + totalTitlePts;
 
-            const completedCount = cumStats.completedHolesCount || 0;
-            const avgPutts = completedCount > 0 ? (cumStats.cumPutts / completedCount).toFixed(2) : '-';
-            const parSaveRate = completedCount > 0 ? Math.round(((cumStats.eagleCount + cumStats.birdieCount + cumStats.parCount) / completedCount) * 100) : 0;
-            const girRate = completedCount > 0 ? Math.round((cumStats.girCount / completedCount) * 100) : 0;
-            const obRate = completedCount > 0 ? Math.round((cumStats.obCount / completedCount) * 100) : 0;
-            const threePattRate = completedCount > 0 ? Math.round((cumStats.threePatCount / completedCount) * 100) : 0;
-            const penaltyHoleRate = completedCount > 0 ? Math.round((cumStats.penaltyHolesCount / completedCount) * 100) : 0;
-            const bunkerHoleRate = completedCount > 0 ? Math.round((cumStats.bunkerHolesCount / completedCount) * 100) : 0;
-
             return (
               <div className="space-y-3">
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs flex items-center justify-between">
@@ -2673,7 +3745,7 @@ function App() {
 
                 <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
                   <div className="flex items-center justify-between border-b pb-1.5">
-                    <span className="text-xs font-black text-slate-800">通算実績サマリー</span>
+                    <span className="text-xs font-black text-slate-800">本日の獲得ポイントサマリー</span>
                     <span className="text-base font-black text-emerald-700">総合 {finalTotalP}P</span>
                   </div>
                   <div className="grid grid-cols-4 gap-2 text-center text-xs">
@@ -2696,129 +3768,6 @@ function App() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
-                  <span className="text-xs font-black text-slate-800 block border-b pb-1.5">スタッツ分析</span>
-                  
-                  <div className="grid grid-cols-5 gap-1 text-center text-[10px]">
-                    <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
-                      <span className="text-emerald-800 block font-medium">イーグル+</span>
-                      <b className="text-xs text-emerald-950">{cumStats.eagleCount}</b>
-                    </div>
-                    <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
-                      <span className="text-emerald-800 block font-medium">バーディ</span>
-                      <b className="text-xs text-emerald-950">{cumStats.birdieCount}</b>
-                    </div>
-                    <div className="bg-blue-50 border border-blue-200 rounded p-1">
-                      <span className="text-blue-800 block font-medium">パー</span>
-                      <b className="text-xs text-blue-950">{cumStats.parCount}</b>
-                    </div>
-                    <div className="bg-slate-50 border border-slate-200 rounded p-1">
-                      <span className="text-slate-600 block font-medium">ボギー</span>
-                      <b className="text-xs text-slate-800">{cumStats.bogeyCount}</b>
-                    </div>
-                    <div className="bg-red-50 border border-red-200 rounded p-1">
-                      <span className="text-red-800 block font-medium">ダボ+</span>
-                      <b className="text-xs text-red-950">{cumStats.doubleBogeyPlusCount}</b>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-center text-[11px] pt-1">
-                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                      <span className="text-[10px] text-slate-400 block font-medium">平均パット (総数)</span>
-                      <b className="text-slate-800">{avgPutts} <span className="text-[10px] text-slate-400">({cumStats.cumPutts})</span></b>
-                    </div>
-                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                      <span className="text-[10px] text-slate-400 block font-medium">パーセーブ率</span>
-                      <b className="text-slate-800">{parSaveRate}%</b>
-                    </div>
-                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                      <span className="text-[10px] text-slate-400 block font-medium">パーオン率 (GIR)</span>
-                      <b className="text-slate-800">{girRate}%</b>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1.5 text-center text-[10px] pt-1">
-                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
-                      <span className="text-slate-500 block">OB率 (総数)</span>
-                      <b className="text-red-700">{obRate}% ({cumStats.obCount})</b>
-                    </div>
-                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
-                      <span className="text-slate-500 block">バンカー総数 (率)</span>
-                      <b className="text-red-700">{cumStats.bunkerCount}回 ({bunkerHoleRate}%)</b>
-                    </div>
-                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
-                      <span className="text-slate-500 block">3パット率</span>
-                      <b className="text-red-700">{threePattRate}%</b>
-                    </div>
-                    <div className="bg-red-50/50 border border-red-100 p-1 rounded">
-                      <span className="text-slate-500 block">ペナ発生率</span>
-                      <b className="text-red-700">{penaltyHoleRate}%</b>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl p-3 border border-slate-200 shadow-xs space-y-2">
-                  <span className="text-xs font-black text-slate-800 block border-b pb-1.5">18H累計個数サマリー</span>
-                  
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-blue-600 block">小技ボーナス獲得数</span>
-                    <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
-                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
-                        <span className="text-blue-800 block">チップイン</span>
-                        <b className="text-xs text-blue-950">{cumStats.chipInCount}回</b>
-                      </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
-                        <span className="text-blue-800 block">1パット</span>
-                        <b className="text-xs text-blue-950">{cumStats.onePatCount}回</b>
-                      </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
-                        <span className="text-blue-800 block">サオイチ</span>
-                        <b className="text-xs text-blue-950">{cumStats.saoIchiCount}回</b>
-                      </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded p-1">
-                        <span className="text-blue-800 block">砂イチ</span>
-                        <b className="text-xs text-blue-950">{cumStats.sunaIchiCount}回</b>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 pt-1 border-t border-slate-100">
-                    <span className="text-[10px] font-bold text-red-600 block">ペナルティ発生数</span>
-                    <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
-                      <div className="bg-red-50 border border-red-200 rounded p-1">
-                        <span className="text-red-800 block">OB</span>
-                        <b className="text-xs text-red-950">{cumStats.obCount}回</b>
-                      </div>
-                      <div className="bg-red-50 border border-red-200 rounded p-1">
-                        <span className="text-red-800 block">池</span>
-                        <b className="text-xs text-red-950">{cumStats.waterCount}回</b>
-                      </div>
-                      <div className="bg-red-50 border border-red-200 rounded p-1">
-                        <span className="text-red-800 block">バンカー</span>
-                        <b className="text-xs text-red-950">{cumStats.bunkerCount}回</b>
-                      </div>
-                      <div className="bg-red-50 border border-red-200 rounded p-1">
-                        <span className="text-red-800 block">3パット</span>
-                        <b className="text-xs text-red-950">{cumStats.threePatCount}回</b>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 pt-1 border-t border-slate-100">
-                    <span className="text-[10px] font-bold text-emerald-600 block">自動救済賞</span>
-                    <div className="grid grid-cols-2 gap-1 text-center text-[10px]">
-                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
-                        <span className="text-emerald-800 block">バウンスバック賞</span>
-                        <b className="text-xs text-emerald-950">{cumStats.bounceBackCount}回</b>
-                      </div>
-                      <div className="bg-emerald-50 border border-emerald-200 rounded p-1">
-                        <span className="text-emerald-800 block">OBパー賞 (ダボ耐え)</span>
-                        <b className="text-xs text-emerald-950">{cumStats.obParCount}回</b>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
                   <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-black text-slate-800">
                     全18ホール詳細戦績明細
@@ -2834,9 +3783,9 @@ function App() {
                       const partner = myPair ? (myPair.p1.id === targetPlayer.id ? myPair.p2 : myPair.p1) : null;
                       const vegasRes = calculateVegasPointsForHole(holeNum);
                       const vegasHoleP = vegasRes.playerPoints[targetPlayer.id] || 0;
-                      const titleAwarded = titlePointsSummary.holeAwarded[holeNum]?.winnerId === targetPlayer.id
-                        ? titlePointsSummary.holeAwarded[holeNum].awardedPoint
-                        : 0;
+                      
+                      const hAward = titlePointsSummary.holeAwarded[holeNum];
+                      const titleAwarded = hAward?.awardedMap?.[targetPlayer.id] || 0;
 
                       const holeFinalP = pts.totalP + vegasHoleP + titleAwarded;
 
@@ -2897,7 +3846,7 @@ function App() {
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <span>📖 公式コンペルール詳細</span>
+                <span>📖 コンペ公式ルール説明</span>
               </h2>
               <button
                 onClick={() => setShowRuleModal(false)}
@@ -2933,25 +3882,26 @@ function App() {
               {ruleModalTab === 1 && (
                 <div className="space-y-2.5">
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. 大会基本形式</h3>
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. スタートコースと進行</h3>
                     <p className="text-[11px]">
-                      ・組ごとに独立したURLで進行し、ホールアウト後に幹事画面から<b>「🔗 成績を統合」</b>で総合リーダーボードを一発作成できます。<br/>
-                      ・「スコアP」「役ボーナスP」「組内ベガスP」「タイトルP」の全合算で最終順位を決定します。
+                      ・OUTスタート組は1Hから、INスタート組は10Hからスタートします。<br/>
+                      ・入力画面のホール番号バーは進行順に上段・下段が配置されます。<br/>
+                      ・最初のホール（OUT:1H / IN:10H）のチームは事前抽選で固定され、2ホール目以降は前ホールの成績順で自動編成されます。
                     </p>
                   </div>
                   <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200">
                     <h3 className="font-bold text-amber-900 text-xs mb-1">2. 奇数時のゴースト自動補完</h3>
                     <p className="text-[11px]">
-                      ・奇数人数の場合、自動で「👻 ゴースト」が追加され偶数化。<br/>
+                      ・参加人数が奇数の場合、自動で「👻 ゴースト」が追加され偶数化されます。<br/>
                       ・全ホール<b>「ボギー固定（Par+1）」</b>、入力不要。<br/>
                       ・他の生身プレイヤー全員が確定した時点で自動完了となります。<br/>
-                      ・ベガス入賞時は<b>生身のパートナーのみポイント獲得</b>。
+                      ・ベガス入賞時は<b>生身のパートナーのみポイント獲得</b>となります。
                     </p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <h3 className="font-bold text-blue-900 text-xs mb-1">3. 個別ハンディキャップ (HDCP)</h3>
                     <p className="text-[11px]">
-                      ・名簿の選手ごとに直前HDCPが保持され、自動セットされます。<br/>
+                      ・プレイヤーごとに設定されたHDCP（打数および適用ホール）に基づき算出。<br/>
                       ・<b>完全ネット基準</b>: スコア判定、ベガス打数、順位付けはすべてネット打数を基準とします。
                     </p>
                   </div>
@@ -2977,11 +3927,11 @@ function App() {
                       <li>・3パット以上: <b className="text-red-600">3パット自動判定 (-1P)</b></li>
                       <li>・サオイチ: <b>+1P</b> (独立トグル)</li>
                       <li>・砂イチ: <b>+1P</b> (砂イチONでバンカー自動ON)</li>
-                      <li>・OB / 池 / バンカー: <b className="text-red-600">各-1P</b> (独立トグル)</li>
+                      <li>・OB / 池 / バンカー: <b className="text-red-600">各-1P</b> (遭遇ホール率として判定)</li>
                     </ul>
                   </div>
                   <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-300">
-                    <h3 className="font-bold text-emerald-950 text-xs mb-1">3. 全自動救済ボーナス詳細 & 具体例</h3>
+                    <h3 className="font-bold text-emerald-950 text-xs mb-1">3. 全自動救済ボーナス詳細</h3>
                     <div className="space-y-1.5 text-[11px]">
                       <div>
                         <b className="text-emerald-900">① バウンスバック賞 (+1P)</b>
@@ -3003,21 +3953,26 @@ function App() {
               {ruleModalTab === 3 && (
                 <div className="space-y-2.5">
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. 組内ラスベガスゲーム</h3>
-                    <p className="text-[11px]">
-                      同じ組の4人（2ペア）の中でたすき掛けを行い、ペアのネット打数を昇順で並べた2桁数字（例: 4打と5打 ➔ 45点）が小さいチームが勝利（1位チーム各2P）。
+                    <h3 className="font-bold text-emerald-800 text-xs mb-1">1. 組内ラスベガスゲームの配当</h3>
+                    <p className="text-[11px] mb-1">
+                      ペア2名のネット打数を昇順で並べた2桁数字（例: 4打と5打 ➔ 45点）が小さいチームが勝利！
                     </p>
+                    <ul className="text-[11px] space-y-1 bg-white p-2 rounded border border-slate-200">
+                      <li>・<b>2ペア (4人1組)</b>: 1位 <b>各1P</b> / 2位 0P</li>
+                      <li>・<b>3〜4ペア (5〜8名)</b>: 1位 <b>各2P</b> / 2位 <b>各1P</b></li>
+                    </ul>
                   </div>
                   <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-300">
                     <h3 className="font-bold text-amber-950 text-xs mb-1">2. 同点（タイ）時の山分け計算</h3>
                     <p className="text-[11px] text-slate-700">
-                      同じチーム点数で並んだ場合、ポイントを合計して同点チーム数で均等に山分け（スプリット）配当します。
+                      同じチーム点数で並んだ場合、該当順位のポイントを合計して同点チーム数で均等に山分け（スプリット）配当します。<br/>
+                      <b>例 (2ペア対決時)</b>: 1位(1P)と2位(0P)を足して2で割る ➔ <b>両チーム各 0.5P ずつ獲得</b>
                     </p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <h3 className="font-bold text-blue-900 text-xs mb-1">3. 全11段階タイブレーク & たすき掛け</h3>
                     <p className="text-[10px] text-slate-600">
-                      1.前Hネット ➔ 2.前Hグロス ➔ 3.前HゲームP ➔ 4.前H小技数 ➔ 5.前Hペナ数 ➔ 6.累計ネット ➔ 7.累計グロス ➔ 8.累計ボナ数 ➔ 9.累計ペナ数 ➔ 10.HDCP ➔ 11.登録順 で厳密に決定し、1位&最下位を組ませる<b>たすき掛け</b>で編成。前H全員完了までチームは非公開です。
+                      前Hネット ➔ 前Hグロス ➔ 前HゲームP ➔ 前H小技数 ➔ 前Hペナ数 ➔ 累計ネット ➔ 累計グロス ➔ 累計ボナ数 ➔ 累計ペナ数 ➔ HDCP ➔ 登録順 で厳密に順位付けし、1位&最下位を組ませる<b>たすき掛け</b>で編成。前H全員完了までチームは非公開です。
                     </p>
                   </div>
                 </div>
@@ -3030,7 +3985,6 @@ function App() {
                     <p className="text-[11px]">
                       ・ニアピン: 幹事指定のPar3 (最大4ホール)<br/>
                       ・ドラコン: 幹事指定のPar5 (最大4ホール)<br/>
-                      ・未指定（「-」）の場合はタイトルなし。<br/>
                       ・基本配当: <b>10P</b>（該当なし時は次回へ持ち越し / 上限20P）。
                     </p>
                   </div>
