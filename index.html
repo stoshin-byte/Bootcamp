@@ -9,7 +9,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <style>
-    /* iOS風の軽快なタップとスクロール */
     body {
       -webkit-tap-highlight-color: transparent;
       user-select: none;
@@ -35,8 +34,8 @@
       <div class="flex items-center space-x-2">
         <span class="text-2xl">⛳</span>
         <div>
-          <h1 id="headerCompName" class="font-bold text-lg leading-tight">ゴルフコンペ スコア管理</h1>
-          <p id="headerCourseInfo" class="text-xs text-emerald-200 hidden">名神栗東カントリー倶楽部</p>
+          <h1 id="headerCompName" class="font-bold text-lg leading-tight">コンペ未選択</h1>
+          <p id="headerCourseInfo" class="text-xs text-emerald-200 hidden">コース情報</p>
         </div>
       </div>
       <div class="flex items-center space-x-2">
@@ -45,7 +44,7 @@
         </button>
         <button id="btnAdminSetting" class="bg-amber-600 hover:bg-amber-500 text-xs px-2.5 py-1.5 rounded-lg font-bold shadow transition flex items-center space-x-1">
           <span>⚙️</span>
-          <span>幹事メニュー</span>
+          <span>幹事設定</span>
         </button>
       </div>
     </div>
@@ -54,48 +53,19 @@
   <!-- ================= MAIN CONTAINER ================= -->
   <main class="max-w-4xl mx-auto px-3 sm:px-4 py-4 w-full flex-1">
 
-    <!-- 1. ADMIN DASHBOARD (HOME) -->
-    <section id="viewAdminDashboard" class="space-y-4">
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
-          <div>
-            <h2 class="text-xl font-bold text-slate-900">幹事ダッシュボード</h2>
-            <p class="text-xs text-slate-500 mt-0.5">コンペの作成・切替およびコース情報の管理</p>
-          </div>
-          <div class="flex items-center space-x-2">
-            <button id="btnSyncSpreadsheet" class="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 text-xs px-3 py-2 rounded-lg font-bold flex items-center space-x-1 transition">
-              <span id="syncIcon">🔄</span>
-              <span>シートからコース更新</span>
-            </button>
-            <button id="btnOpenNewCompModal" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg font-bold shadow transition">
-              ＋ 新規コンペ作成
-            </button>
-          </div>
-        </div>
-
-        <!-- アクティブなコンペ表示 -->
-        <div class="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
-          <div>
-            <span class="text-[10px] uppercase font-bold tracking-wider bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded">現在選択中</span>
-            <h3 id="dashActiveCompName" class="text-lg font-bold text-emerald-950 mt-1">コンペ未選択</h3>
-            <p id="dashActiveCompDate" class="text-xs text-emerald-700 mt-0.5">日付: --</p>
-          </div>
-          <button id="btnEnterActiveComp" class="bg-emerald-700 hover:bg-emerald-800 text-white text-xs px-4 py-2 rounded-lg font-bold shadow transition disabled:opacity-50" disabled>
-            スコア入力画面へ ➔
-          </button>
-        </div>
-
-        <!-- 過去・登録済みコンペ一覧 -->
-        <div class="mt-6">
-          <h4 class="text-sm font-bold text-slate-700 mb-2">開催コンペ一覧</h4>
-          <div id="compListContainer" class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white text-sm">
-            <div class="p-4 text-center text-slate-400 text-xs">コンペ履歴がありません</div>
-          </div>
-        </div>
+    <!-- 1. コンペ未選択時のプレースホルダー表示 -->
+    <section id="viewNoCompSelected" class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center space-y-4 my-8">
+      <div class="w-16 h-16 bg-emerald-100 text-emerald-800 rounded-full flex items-center justify-center mx-auto text-3xl">⛳</div>
+      <div>
+        <h2 class="text-lg font-bold text-slate-800">コンペが選択されていません</h2>
+        <p class="text-xs text-slate-500 mt-1">「幹事設定」から既存のコンペを選択するか、新しいコンペを作成してください。</p>
       </div>
+      <button id="btnOpenAdminFromEmpty" class="bg-emerald-700 hover:bg-emerald-800 text-white text-xs px-5 py-2.5 rounded-lg font-bold shadow transition">
+        ⚙️ 幹事設定を開く
+      </button>
     </section>
 
-    <!-- 2. SCORING SCREEN (APP MAIN) -->
+    <!-- 2. SCORING SCREEN (スコア入力画面 UI完全復元) -->
     <section id="viewScoring" class="hidden space-y-4">
       
       <!-- ホール選択バー (2段 1-9H / 10-18H) -->
@@ -111,7 +81,7 @@
       </div>
 
       <!-- スコア入力カード -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 relative">
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 relative" id="cardScoreInput">
         <div class="flex items-center justify-between pb-3 border-b border-slate-100">
           <div class="flex items-center space-x-2">
             <span id="cardHoleBadge" class="bg-emerald-800 text-white text-sm font-bold px-2.5 py-1 rounded-lg font-mono">1H</span>
@@ -221,8 +191,6 @@
         </div>
         <p class="text-xs text-slate-400 mt-2">過去全ラウンドのグロス、平均打数、獲得ポイント、タイトル王座ランキング</p>
 
-        <div id="statsSummaryContainer" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4"></div>
-
         <div class="mt-6">
           <h3 class="text-sm font-bold text-amber-400 mb-2">直近5ラウンド平均スタッツ</h3>
           <div id="statsRecentFiveTableWrapper" class="overflow-x-auto custom-scrollbar border border-slate-800 rounded-lg">
@@ -233,7 +201,6 @@
                   <th class="p-2.5">平均Gross</th>
                   <th class="p-2.5">ベスト</th>
                   <th class="p-2.5">平均パット</th>
-                  <th class="p-2.5">パーオン率</th>
                   <th class="p-2.5">通算R数</th>
                 </tr>
               </thead>
@@ -248,84 +215,143 @@
 
   <!-- ================= MODALS ================= -->
 
-  <!-- 新規コンペ作成モーダル (スプレッドシート連動対応) -->
-  <div id="modalNewComp" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-5">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="font-bold text-slate-800 text-base">新規コンペ作成</h3>
-        <button id="btnCloseNewCompModal" class="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+  <!-- 幹事設定モーダル (タブ復元: コンペ切替 / 新規作成 / プレイヤー管理) -->
+  <div id="modalAdmin" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
+      <!-- モーダルヘッダー -->
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+        <h3 class="font-bold text-slate-800 text-base flex items-center space-x-1.5">
+          <span>⚙️</span>
+          <span>幹事メニュー</span>
+        </h3>
+        <button id="btnCloseAdminModal" class="text-slate-400 hover:text-slate-600 text-lg">✕</button>
       </div>
 
-      <div class="space-y-4 mt-4 text-xs">
-        <div>
-          <label class="block font-bold text-slate-700 mb-1">コンペ名称</label>
-          <input type="text" id="newCompName" placeholder="例: 第12回 菊花杯" class="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 outline-none text-sm font-medium">
-        </div>
+      <!-- モーダル内タブ -->
+      <div class="flex border-b border-slate-200 bg-slate-100 text-xs font-bold text-slate-600">
+        <button class="admin-tab-btn flex-1 py-2.5 text-center border-b-2 border-emerald-600 text-emerald-800 bg-white" data-atab="list">
+          🏆 コンペ切替
+        </button>
+        <button class="admin-tab-btn flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-slate-900" data-atab="create">
+          ＋ 新規作成
+        </button>
+        <button class="admin-tab-btn flex-1 py-2.5 text-center border-b-2 border-transparent hover:text-slate-900" data-atab="players">
+          👥 プレイヤー管理
+        </button>
+      </div>
 
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">開催日</label>
-            <input type="date" id="newCompDate" class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none">
-          </div>
-          <div>
-            <label class="block font-bold text-slate-700 mb-1">スタート</label>
-            <select id="newCompStartHole" class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-bold">
-              <option value="1">1H (OUTスタート)</option>
-              <option value="10">10H (INスタート)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- スプレッドシート連動 コース選択エリア -->
-        <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+      <!-- モーダルボディ -->
+      <div class="p-5 overflow-y-auto flex-1 text-xs">
+        
+        <!-- タブ1: コンペ切替・履歴 -->
+        <div id="atabList" class="space-y-4">
           <div class="flex items-center justify-between">
-            <span class="font-bold text-slate-800">⛳ コースプリセット (スプレッドシート)</span>
-            <span id="sheetStatusLabel" class="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">同期済み</span>
+            <span class="text-slate-600 font-bold">開催済みコンペ一覧</span>
+            <button id="btnUnselectComp" class="text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded font-bold transition">
+              コンペ未選択に戻す
+            </button>
+          </div>
+          <div id="compListContainer" class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white text-xs">
+            <div class="p-4 text-center text-slate-400">コンペ履歴がありません</div>
+          </div>
+        </div>
+
+        <!-- タブ2: 新規コンペ作成 (プレイヤープルダウン・INスタート自動反転) -->
+        <div id="atabCreate" class="hidden space-y-3.5">
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">コンペ名称</label>
+            <input type="text" id="newCompName" placeholder="例: 第12回 菊花杯" class="w-full border border-slate-300 rounded-lg p-2 text-sm font-medium focus:ring-2 focus:ring-emerald-500 outline-none">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">開催日</label>
+              <input type="date" id="newCompDate" class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none">
+            </div>
+            <div>
+              <label class="block font-bold text-slate-700 mb-1">スタート</label>
+              <select id="newCompStartHole" class="w-full border border-slate-300 rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none font-bold">
+                <option value="1">1H (OUTスタート)</option>
+                <option value="10">10H (INスタート)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- スプレッドシート連携 コースプリセット -->
+          <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-slate-800">⛳ コース情報 (スプレッドシート連動)</span>
+              <button id="btnSyncSpreadsheet" class="text-blue-700 hover:text-blue-800 font-bold flex items-center space-x-1">
+                <span id="syncIcon">🔄</span>
+                <span>シート更新</span>
+              </button>
+            </div>
+
+            <div>
+              <select id="selectCourseMaster" class="w-full border border-slate-300 rounded-lg p-2 font-bold bg-white outline-none">
+                <option value="">-- スプレッドシートから選択 --</option>
+              </select>
+            </div>
+
+            <!-- ハーフ選択 (27H対応) -->
+            <div id="halfSelectWrapper" class="grid grid-cols-2 gap-2 hidden">
+              <div>
+                <label class="block text-slate-500 mb-0.5">前半ハーフ (1-9H)</label>
+                <select id="selectHalfFront" class="w-full border border-slate-300 rounded-lg p-1.5 bg-white font-bold outline-none"></select>
+              </div>
+              <div>
+                <label class="block text-slate-500 mb-0.5">後半ハーフ (10-18H)</label>
+                <select id="selectHalfBack" class="w-full border border-slate-300 rounded-lg p-1.5 bg-white font-bold outline-none"></select>
+              </div>
+            </div>
+
+            <div class="text-[11px] text-slate-500 bg-white p-2 rounded border border-slate-200">
+              <div><strong>Par 3 (ニアピン):</strong> <span id="previewPar3Holes">--</span></div>
+              <div><strong>Par 5 (ドラコン):</strong> <span id="previewPar5Holes">--</span></div>
+            </div>
+          </div>
+
+          <!-- 参加メンバー (プレイヤープルダウン選択・復元) -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="font-bold text-slate-700">参加プレイヤー選択 (プルダウン)</label>
+              <span class="text-[11px] text-slate-400">2〜5ペア (4〜10名)</span>
+            </div>
+            <div id="playerSelectDropdownsContainer" class="grid grid-cols-2 gap-2"></div>
+          </div>
+
+          <div class="pt-2 flex justify-end space-x-2">
+            <button id="btnCreateNewCompSubmit" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow transition text-sm">
+              新規コンペを作成して開始
+            </button>
+          </div>
+        </div>
+
+        <!-- タブ3: プレイヤー名簿管理 (完全復元) -->
+        <div id="atabPlayers" class="hidden space-y-4">
+          <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+            <span class="font-bold text-slate-800 block">名簿に新規プレイヤーを追加</span>
+            <div class="flex items-center space-x-2">
+              <input type="text" id="newMasterPlayerName" placeholder="プレイヤー名 (例: 田中)" class="flex-1 border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-emerald-500 outline-none">
+              <input type="number" id="newMasterPlayerHdcp" placeholder="HDCP" class="w-20 border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-emerald-500 outline-none" value="0">
+              <button id="btnAddNewMasterPlayer" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-2 rounded-lg transition whitespace-nowrap">
+                追加
+              </button>
+            </div>
           </div>
 
           <div>
-            <label class="block text-slate-600 mb-1 font-medium">ゴルフ場名</label>
-            <select id="selectCourseMaster" class="w-full border border-slate-300 rounded-lg p-2 font-bold bg-white outline-none">
-              <option value="">-- スプレッドシートから選択 --</option>
-            </select>
-          </div>
-
-          <!-- ハーフ組み合わせ選択 (27H対応) -->
-          <div id="halfSelectWrapper" class="grid grid-cols-2 gap-2 hidden">
-            <div>
-              <label class="block text-slate-600 mb-1 font-medium">前半ハーフ (1-9H)</label>
-              <select id="selectHalfFront" class="w-full border border-slate-300 rounded-lg p-1.5 bg-white font-bold outline-none"></select>
-            </div>
-            <div>
-              <label class="block text-slate-600 mb-1 font-medium">後半ハーフ (10-18H)</label>
-              <select id="selectHalfBack" class="w-full border border-slate-300 rounded-lg p-1.5 bg-white font-bold outline-none"></select>
-            </div>
-          </div>
-
-          <!-- Par割り当てプレビュー -->
-          <div class="text-[11px] text-slate-500 bg-white p-2 rounded border border-slate-200">
-            <div><strong>Par 3:</strong> <span id="previewPar3Holes">--</span></div>
-            <div><strong>Par 5:</strong> <span id="previewPar5Holes">--</span></div>
+            <span class="font-bold text-slate-700 block mb-1.5">登録済み名簿 (クラウド自動同期)</span>
+            <div id="masterPlayerListContainer" class="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white"></div>
           </div>
         </div>
 
-        <!-- 参加メンバー入力 -->
-        <div>
-          <label class="block font-bold text-slate-700 mb-1">参加メンバー (改行区切りまたはカンマ区切り)</label>
-          <textarea id="newCompMembers" rows="4" placeholder="田中&#10;佐藤&#10;鈴木&#10;高橋" class="w-full border border-slate-300 rounded-lg p-2 font-medium focus:ring-2 focus:ring-emerald-500 outline-none"></textarea>
-          <p class="text-[11px] text-slate-400 mt-0.5">※4名〜10名（2〜5ペア）に対応しています</p>
-        </div>
-
-        <div class="pt-2 flex justify-end space-x-2">
-          <button id="btnCancelNewComp" class="px-4 py-2 text-slate-600 font-bold hover:bg-slate-100 rounded-lg transition">キャンセル</button>
-          <button id="btnCreateNewCompSubmit" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow transition">作成して開始</button>
-        </div>
       </div>
     </div>
   </div>
 
-  <!-- ルール説明モーダル (5ペア配当・山分け明記) -->
-  <div id="modalRules" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <!-- ルール説明モーダル (11段階タイブレーク・山分け・全技能賞の完全版復元) -->
+  <div id="modalRules" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 hidden">
     <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
         <h3 class="font-bold text-slate-900 text-base">📜 コンペルール ＆ 配当基準</h3>
@@ -333,12 +359,14 @@
       </div>
 
       <div class="mt-4 space-y-4 text-xs text-slate-700 leading-relaxed">
-        <!-- ラスベガスルール -->
-        <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+        
+        <!-- ラスベガス詳細 -->
+        <div class="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200">
           <h4 class="font-bold text-emerald-950 text-sm mb-1.5">🎲 ラスベガス配当方式 (2〜5ペア対応)</h4>
           <p>各ホール2名1組のペアを組み、各組の「良いスコア(10の位) ＋ 悪いスコア(1の位)」の2桁の数字（点数）の低さで勝敗を競います。</p>
-          
-          <div class="mt-2.5 overflow-hidden border border-emerald-200 rounded-lg bg-white">
+          <p class="text-[11px] text-emerald-800 mt-1">※例：4打と5打のペアは「45点」。3打と6打のペアは「36点」となり、36点の組が上位となります。</p>
+
+          <div class="mt-3 overflow-hidden border border-emerald-200 rounded-lg bg-white">
             <table class="w-full text-center text-[11px]">
               <thead class="bg-emerald-100/70 text-emerald-900 font-bold">
                 <tr>
@@ -382,26 +410,31 @@
             </table>
           </div>
 
-          <div class="mt-2.5 space-y-1 text-slate-600 bg-white/70 p-2 rounded border border-emerald-100">
-            <strong class="text-slate-800">【同点時の山分け(タイブレーク)ルール】</strong>
+          <!-- タイブレーク ＆ 山分け詳細 -->
+          <div class="mt-3 space-y-1.5 text-slate-600 bg-white/80 p-2.5 rounded-lg border border-emerald-100">
+            <strong class="text-slate-800 block text-xs">【同点時の山分け(タイブレーク)ルール】</strong>
             <p>同点ペアが発生した場合、該当順位のポイントを合計して均等配分（スプリット）します。</p>
             <ul class="list-disc list-inside space-y-0.5 text-[11px] text-slate-600">
               <li>2ペア時：1位タイなら各0.5Pずつ山分け</li>
               <li>3ペア時：1位タイ(2組)なら (2P+1P)÷2 ＝ <strong>各1.5P</strong>、3位は0P</li>
               <li>4ペア時：2位タイ(2組)なら (1P+0P)÷2 ＝ <strong>各0.5P</strong></li>
+              <li>5ペア時：2位タイ(2組)なら (2P+1P)÷2 ＝ <strong>各1.5P</strong></li>
             </ul>
           </div>
         </div>
 
-        <!-- 技能賞・ペナルティ -->
-        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
-          <h4 class="font-bold text-slate-900 text-sm">⭐ 技能賞 ＆ パットペナルティ</h4>
-          <ul class="space-y-1">
-            <li><strong>ニアピン / ドラコン:</strong> 各ホール勝者に +1P</li>
-            <li><strong>砂イチ:</strong> バンカー(-1P)から1パットでパー以上セーブ（実質+1P相殺連動）</li>
-            <li><strong>竿イチ:</strong> グリーン外からピン旗長以上のロングパットを沈めた場合(+1P)</li>
-            <li><strong>チップイン:</strong> 0パット時(+2P)自動付与</li>
-            <li><strong>3パット以上:</strong> -1P自動減点</li>
+        <!-- 技能賞 ＆ ボーナス詳細 -->
+        <div class="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+          <h4 class="font-bold text-slate-900 text-sm">⭐ 技能賞・ボーナス ＆ パットペナルティ</h4>
+          <ul class="space-y-1.5 text-[11px]">
+            <li><strong>⛳ ニアピン推奨:</strong> Par3ホールで最もピンに近づけた選手に +1P</li>
+            <li><strong>🚀 ドラコン推奨:</strong> Par5ホールで最も飛距離を出したフェアウェイキープ選手に +1P</li>
+            <li><strong>🏖️ 砂イチ:</strong> バンカー(-1P)からグリーンに乗せ、1パットでパー以上セーブした場合に+1P付与（バンカーペナルティと自動連動相殺）</li>
+            <li><strong>🚩 竿イチ:</strong> グリーン外からピン旗長以上のロングパットを直接沈めた場合に +1P</li>
+            <li><strong>🎯 チップイン:</strong> 0パット達成時に自動で +2P 付与</li>
+            <li><strong>1パット:</strong> 1パット達成時に +1P 付与</li>
+            <li><strong>⚠️ 3パット以上:</strong> 3パット以上叩いたホールで自動的に -1P 減点</li>
+            <li><strong>🔥 バウンスバック:</strong> ボギー以下の直後ホールでバーディ以上を獲得した場合に +1P</li>
           </ul>
         </div>
       </div>
@@ -415,15 +448,17 @@
 
     // アプリ状態
     let appState = {
-      viewMode: 'admin',      // 'admin' | 'player'
+      viewMode: 'scoring',    // 'scoring' | 'stats'
+      isPlayerMode: false,
       activeCompId: null,
       currentHole: 1,
       activeTab: 'vegas',
-      courses: {},           // スプレッドシートから読み込んだコース辞書
+      courses: {},           // スプレッドシート同期コース一覧
+      masterPlayers: [],     // プレイヤー名簿マスタ
       currentComp: null      // 現在選択中のコンペデータ
     };
 
-    // Firebase設定 (プロジェクト用)
+    // Firebase設定
     const firebaseConfig = {
       apiKey: "AIzaSyDummyKeyForFallback",
       authDomain: "golf-score-comp.firebaseapp.com",
@@ -445,34 +480,139 @@
     window.addEventListener('DOMContentLoaded', async () => {
       parseUrlParams();
       initUIListeners();
+      loadMasterPlayers();
       await loadSpreadsheetCourses();
       loadCompHistory();
       renderApp();
     });
 
-    // URLルーティング解析
     function parseUrlParams() {
       const params = new URLSearchParams(window.location.search);
       if (params.get('view') === 'stats') {
         appState.viewMode = 'stats';
-      } else if (params.get('mode') === 'player') {
-        appState.viewMode = 'player';
-      } else {
-        appState.viewMode = 'admin';
       }
-
+      if (params.get('mode') === 'player') {
+        appState.isPlayerMode = true;
+      }
       const compId = params.get('comp');
       if (compId) {
         appState.activeCompId = compId;
       }
     }
 
-    // --- 3. スプレッドシート コース取得 & 解析 ---
+    // --- 3. プレイヤー名簿マスタ管理 (Firestore & localStorage) ---
+    function loadMasterPlayers() {
+      const cached = localStorage.getItem('golf_player_master');
+      if (cached) {
+        try { appState.masterPlayers = JSON.parse(cached); } catch(e){}
+      } else {
+        // 初期デフォルト
+        appState.masterPlayers = [
+          { id: 'p1', name: '田中', hdcp: 12 },
+          { id: 'p2', name: '佐藤', hdcp: 15 },
+          { id: 'p3', name: '鈴木', hdcp: 18 },
+          { id: 'p4', name: '高橋', hdcp: 22 }
+        ];
+        saveMasterPlayers();
+      }
+
+      // Firestoreから非同期同期
+      if (db) {
+        db.collection('golf_player_master').get().then(snap => {
+          if (!snap.empty) {
+            const list = [];
+            snap.forEach(doc => list.push(doc.data()));
+            appState.masterPlayers = list;
+            saveMasterPlayers(false);
+            renderMasterPlayerList();
+            renderPlayerDropdowns();
+          }
+        }).catch(e => console.warn(e));
+      }
+
+      renderMasterPlayerList();
+      renderPlayerDropdowns();
+    }
+
+    function saveMasterPlayers(syncCloud = true) {
+      localStorage.setItem('golf_player_master', JSON.stringify(appState.masterPlayers));
+      if (syncCloud && db) {
+        appState.masterPlayers.forEach(p => {
+          db.collection('golf_player_master').doc(p.id).set(p).catch(e => console.warn(e));
+        });
+      }
+    }
+
+    function renderMasterPlayerList() {
+      const container = document.getElementById('masterPlayerListContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (appState.masterPlayers.length === 0) {
+        container.innerHTML = '<div class="p-3 text-center text-slate-400">登録プレイヤーがいません</div>';
+        return;
+      }
+
+      appState.masterPlayers.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'p-2.5 flex items-center justify-between hover:bg-slate-50 transition';
+        item.innerHTML = `
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-slate-800">${p.name}</span>
+            <span class="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">HDCP ${p.hdcp || 0}</span>
+          </div>
+          <button onclick="deleteMasterPlayer('${p.id}')" class="text-rose-500 hover:text-rose-700 font-bold px-2 py-1">
+            削除
+          </button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    function deleteMasterPlayer(id) {
+      if (!confirm('このプレイヤーを名簿から削除しますか？')) return;
+      appState.masterPlayers = appState.masterPlayers.filter(p => p.id !== id);
+      saveMasterPlayers();
+      if (db) db.collection('golf_player_master').doc(id).delete().catch(e=>console.warn(e));
+      renderMasterPlayerList();
+      renderPlayerDropdowns();
+    }
+
+    // 新規コンペ作成画面のプレイヤープルダウン生成
+    function renderPlayerDropdowns() {
+      const container = document.getElementById('playerSelectDropdownsContainer');
+      if (!container) return;
+      container.innerHTML = '';
+
+      // 最大10名 (5ペア)
+      for (let i = 1; i <= 10; i++) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = `
+          <label class="block text-[11px] text-slate-500 mb-0.5">選手 ${i} ${i <= 4 ? '<span class="text-rose-500">*</span>' : '(任意)'}</label>
+          <select id="selectPlayerSlot_${i}" class="w-full border border-slate-300 rounded-lg p-1.5 bg-white font-medium outline-none">
+            <option value="">-- 未選択 --</option>
+          </select>
+        `;
+        container.appendChild(wrap);
+
+        const sel = wrap.querySelector('select');
+        appState.masterPlayers.forEach(mp => {
+          const opt = new Option(mp.name, mp.name);
+          sel.add(opt);
+        });
+
+        // デフォルトで先頭4名を割り当て
+        if (i <= 4 && appState.masterPlayers[i - 1]) {
+          sel.value = appState.masterPlayers[i - 1].name;
+        }
+      }
+    }
+
+    // --- 4. スプレッドシート コース取得 & 解析 ---
     async function loadSpreadsheetCourses() {
       const syncIcon = document.getElementById('syncIcon');
       if (syncIcon) syncIcon.classList.add('animate-spin');
 
-      // 1. ローカルキャッシュから即時復元
       const cached = localStorage.getItem('golf_course_presets_cache');
       if (cached) {
         try { appState.courses = JSON.parse(cached); } catch(e){}
@@ -483,23 +623,20 @@
         if (res.ok) {
           const csvText = await res.text();
           parseAndSaveCourses(csvText);
-          const status = document.getElementById('sheetStatusLabel');
-          if (status) status.innerText = '同期完了 (' + Object.keys(appState.courses).length + '件)';
         }
       } catch (err) {
-        console.warn("スプレッドシート取得エラー (キャッシュを使用):", err);
+        console.warn("スプレッドシート取得エラー (キャッシュ使用):", err);
       } finally {
         if (syncIcon) syncIcon.classList.remove('animate-spin');
         populateCourseDropdown();
       }
     }
 
-    // CSVパース (A列:コース名, B列:ハーフ名, C~K列:各ホールPar)
     function parseAndSaveCourses(csvText) {
       const lines = csvText.trim().split(/\r\n|\n/);
       const parsed = {};
 
-      lines.forEach((line, idx) => {
+      lines.forEach((line) => {
         const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
         if (cols.length < 11) return;
 
@@ -507,7 +644,6 @@
         const halfName = cols[1];
         if (!courseName || !halfName) return;
 
-        // 9ホール分のPar
         const pars = [];
         for (let i = 2; i <= 10; i++) {
           pars.push(parseInt(cols[i], 10) || 4);
@@ -525,7 +661,6 @@
       }
     }
 
-    // コース選択プルダウンへの注入
     function populateCourseDropdown() {
       const select = document.getElementById('selectCourseMaster');
       if (!select) return;
@@ -537,37 +672,36 @@
         opt.textContent = cName;
         select.appendChild(opt);
       });
+
+      // 名神栗東があれば初期選択
+      if (appState.courses['名神栗東カントリー倶楽部']) {
+        select.value = '名神栗東カントリー倶楽部';
+        onCourseSelected('名神栗東カントリー倶楽部');
+      }
     }
 
-    // --- 4. コンペ管理 (LocalStorage & Firestore) ---
+    // --- 5. コンペ管理 (LocalStorage & Firestore) ---
     function loadCompHistory() {
       const historyList = JSON.parse(localStorage.getItem('golf_comp_history_list') || '[]');
       const container = document.getElementById('compListContainer');
-      const activeBtn = document.getElementById('btnEnterActiveComp');
       
       if (!historyList || historyList.length === 0) {
-        container.innerHTML = '<div class="p-4 text-center text-slate-400 text-xs">登録されたコンペはありません</div>';
-        if (activeBtn) activeBtn.disabled = true;
+        container.innerHTML = '<div class="p-4 text-center text-slate-400">登録されたコンペはありません</div>';
         return;
-      }
-
-      // 直近コンペをアクティブに設定
-      if (!appState.activeCompId && historyList.length > 0) {
-        appState.activeCompId = historyList[0].id;
       }
 
       container.innerHTML = '';
       historyList.forEach(comp => {
         const isCurrent = comp.id === appState.activeCompId;
         const item = document.createElement('div');
-        item.className = `p-3.5 flex items-center justify-between hover:bg-slate-50 transition ${isCurrent ? 'bg-emerald-50/60' : ''}`;
+        item.className = `p-3 flex items-center justify-between hover:bg-slate-50 transition ${isCurrent ? 'bg-emerald-50/70' : ''}`;
         item.innerHTML = `
           <div>
             <div class="flex items-center space-x-2">
               <span class="font-bold text-slate-800 text-sm">${comp.name}</span>
               ${isCurrent ? '<span class="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded">選択中</span>' : ''}
             </div>
-            <div class="text-xs text-slate-500 mt-0.5 flex items-center space-x-2">
+            <div class="text-[11px] text-slate-500 mt-0.5 flex items-center space-x-2">
               <span>📅 ${comp.date || '--'}</span>
               <span>⛳ ${comp.courseName || '未設定'}</span>
               <span>👥 ${comp.players?.length || 0}名</span>
@@ -575,21 +709,42 @@
           </div>
           <div class="flex items-center space-x-1.5">
             <button onclick="switchComp('${comp.id}')" class="px-3 py-1.5 text-xs font-bold rounded-lg border ${isCurrent ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}">
-              ${isCurrent ? '開く' : '選択'}
+              ${isCurrent ? '表示中' : '選択'}
+            </button>
+            <button onclick="deleteComp('${comp.id}')" class="px-2 py-1.5 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg">
+              削除
             </button>
           </div>
         `;
         container.appendChild(item);
       });
 
-      // アクティブコンペ情報更新
-      loadActiveCompData();
+      if (appState.activeCompId) {
+        loadActiveCompData();
+      }
     }
 
     function switchComp(compId) {
       appState.activeCompId = compId;
+      loadActiveCompData();
+      document.getElementById('modalAdmin').classList.add('hidden');
+      renderApp();
+    }
+
+    function deleteComp(compId) {
+      if (!confirm('このコンペデータを削除しますか？')) return;
+      let history = JSON.parse(localStorage.getItem('golf_comp_history_list') || '[]');
+      history = history.filter(c => c.id !== compId);
+      localStorage.setItem('golf_comp_history_list', JSON.stringify(history));
+      localStorage.removeItem(`golf_data_${compId}`);
+      if (db) db.collection('golf_comps').doc(compId).delete().catch(e=>console.warn(e));
+
+      if (appState.activeCompId === compId) {
+        appState.activeCompId = null;
+        appState.currentComp = null;
+      }
       loadCompHistory();
-      enterScoringView();
+      renderApp();
     }
 
     function loadActiveCompData() {
@@ -598,43 +753,49 @@
       if (raw) {
         try {
           appState.currentComp = JSON.parse(raw);
-          document.getElementById('dashActiveCompName').innerText = appState.currentComp.name;
-          document.getElementById('dashActiveCompDate').innerText = `日付: ${appState.currentComp.date} | コース: ${appState.currentComp.courseName || '名神栗東'}`;
           document.getElementById('headerCompName').innerText = appState.currentComp.name;
-          document.getElementById('btnEnterActiveComp').disabled = false;
+          const courseInfo = document.getElementById('headerCourseInfo');
+          courseInfo.innerText = `${appState.currentComp.courseName || ''} (${appState.currentComp.date || ''})`;
+          courseInfo.classList.remove('hidden');
+          appState.currentHole = appState.currentComp.startHole || 1;
         } catch(e){}
       }
     }
 
-    // --- 5. UI イベントリスナー設定 ---
+    // --- 6. UI イベントリスナー設定 ---
     function initUIListeners() {
-      // 幹事メニュー
+      // 幹事設定モーダル開閉
       document.getElementById('btnAdminSetting').addEventListener('click', () => {
-        appState.viewMode = 'admin';
+        document.getElementById('modalAdmin').classList.remove('hidden');
+      });
+      document.getElementById('btnOpenAdminFromEmpty').addEventListener('click', () => {
+        document.getElementById('modalAdmin').classList.remove('hidden');
+      });
+      document.getElementById('btnCloseAdminModal').addEventListener('click', () => {
+        document.getElementById('modalAdmin').classList.add('hidden');
+      });
+
+      // 幹事モーダル内タブ切替
+      document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const atab = e.currentTarget.getAttribute('data-atab');
+          switchAdminTab(atab);
+        });
+      });
+
+      // コンペ未選択に戻すボタン
+      document.getElementById('btnUnselectComp').addEventListener('click', () => {
+        appState.activeCompId = null;
+        appState.currentComp = null;
+        document.getElementById('headerCompName').innerText = 'コンペ未選択';
+        document.getElementById('headerCourseInfo').classList.add('hidden');
+        document.getElementById('modalAdmin').classList.add('hidden');
         renderApp();
       });
 
       // スプレッドシート再同期ボタン
       document.getElementById('btnSyncSpreadsheet').addEventListener('click', async () => {
         await loadSpreadsheetCourses();
-      });
-
-      // スコア入力画面へ進む
-      document.getElementById('btnEnterActiveComp').addEventListener('click', () => {
-        enterScoringView();
-      });
-
-      // 新規コンペモーダル開閉
-      document.getElementById('btnOpenNewCompModal').addEventListener('click', () => {
-        document.getElementById('modalNewComp').classList.remove('hidden');
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('newCompDate').value = today;
-      });
-      document.getElementById('btnCloseNewCompModal').addEventListener('click', () => {
-        document.getElementById('modalNewComp').classList.add('hidden');
-      });
-      document.getElementById('btnCancelNewComp').addEventListener('click', () => {
-        document.getElementById('modalNewComp').classList.add('hidden');
       });
 
       // ルールモーダル開閉
@@ -645,7 +806,7 @@
         document.getElementById('modalRules').classList.add('hidden');
       });
 
-      // タブ切替
+      // 成績タブ切替
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           const tab = e.currentTarget.getAttribute('data-tab');
@@ -653,21 +814,58 @@
         });
       });
 
-      // コース選択変更連動
+      // コース選択連動
       document.getElementById('selectCourseMaster').addEventListener('change', (e) => {
         onCourseSelected(e.target.value);
       });
       document.getElementById('selectHalfFront').addEventListener('change', updateCourseHolePreview);
       document.getElementById('selectHalfBack').addEventListener('change', updateCourseHolePreview);
 
+      // INスタート時の「前半・後半ハーフ」自動反転連動
+      document.getElementById('newCompStartHole').addEventListener('change', (e) => {
+        handleStartHoleChange(parseInt(e.target.value, 10));
+      });
+
       // 新規コンペ作成サブミット
       document.getElementById('btnCreateNewCompSubmit').addEventListener('click', handleCreateNewComp);
+
+      // 名簿プレイヤー追加
+      document.getElementById('btnAddNewMasterPlayer').addEventListener('click', () => {
+        const nameInput = document.getElementById('newMasterPlayerName');
+        const hdcpInput = document.getElementById('newMasterPlayerHdcp');
+        const name = nameInput.value.trim();
+        const hdcp = parseInt(hdcpInput.value, 10) || 0;
+        if (!name) return;
+
+        appState.masterPlayers.push({
+          id: 'p_' + Date.now(),
+          name: name,
+          hdcp: hdcp
+        });
+        saveMasterPlayers();
+        renderMasterPlayerList();
+        renderPlayerDropdowns();
+        nameInput.value = '';
+      });
 
       // ロックトグル
       document.getElementById('btnToggleLock').addEventListener('click', toggleHoleLock);
     }
 
-    // コース選択時のハーフ組み合わせ制御
+    function switchAdminTab(atab) {
+      document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        const isTarget = btn.getAttribute('data-atab') === atab;
+        btn.className = `admin-tab-btn flex-1 py-2.5 text-center border-b-2 font-bold transition ${
+          isTarget ? 'border-emerald-600 text-emerald-800 bg-white' : 'border-transparent text-slate-500 hover:text-slate-900'
+        }`;
+      });
+
+      document.getElementById('atabList').classList.toggle('hidden', atab !== 'list');
+      document.getElementById('atabCreate').classList.toggle('hidden', atab !== 'create');
+      document.getElementById('atabPlayers').classList.toggle('hidden', atab !== 'players');
+    }
+
+    // コース選択時のハーフ組み合わせ生成
     function onCourseSelected(cName) {
       const halfWrapper = document.getElementById('halfSelectWrapper');
       const selectF = document.getElementById('selectHalfFront');
@@ -682,26 +880,48 @@
       selectF.innerHTML = '';
       selectB.innerHTML = '';
 
-      halves.forEach((h, idx) => {
-        const opt1 = new Option(h + ' コース', h);
-        const opt2 = new Option(h + ' コース', h);
-        selectF.add(opt1);
-        selectB.add(opt2);
+      halves.forEach((h) => {
+        selectF.add(new Option(h + ' コース', h));
+        selectB.add(new Option(h + ' コース', h));
       });
 
-      // デフォルト割り当て (OUT / IN または 1番目 / 2番目)
-      if (halves.includes('OUT') && halves.includes('IN')) {
-        selectF.value = 'OUT';
-        selectB.value = 'IN';
-      } else if (halves.length >= 2) {
-        selectF.selectedIndex = 0;
-        selectB.selectedIndex = 1;
-      }
-
+      const startHole = parseInt(document.getElementById('newCompStartHole').value, 10);
+      applyHalvesForStartHole(halves, startHole);
       updateCourseHolePreview();
     }
 
-    // Par 3 / Par 5 のプレビュー計算
+    // INスタート時の前半/後半ハーフ自動反転
+    function handleStartHoleChange(startHole) {
+      const cName = document.getElementById('selectCourseMaster').value;
+      if (!cName || !appState.courses[cName]) return;
+      const halves = Object.keys(appState.courses[cName].halves);
+      applyHalvesForStartHole(halves, startHole);
+      updateCourseHolePreview();
+    }
+
+    function applyHalvesForStartHole(halves, startHole) {
+      const selectF = document.getElementById('selectHalfFront');
+      const selectB = document.getElementById('selectHalfBack');
+
+      if (halves.includes('OUT') && halves.includes('IN')) {
+        if (startHole === 10) {
+          selectF.value = 'IN';
+          selectB.value = 'OUT';
+        } else {
+          selectF.value = 'OUT';
+          selectB.value = 'IN';
+        }
+      } else if (halves.length >= 2) {
+        if (startHole === 10) {
+          selectF.selectedIndex = 1;
+          selectB.selectedIndex = 0;
+        } else {
+          selectF.selectedIndex = 0;
+          selectB.selectedIndex = 1;
+        }
+      }
+    }
+
     function updateCourseHolePreview() {
       const cName = document.getElementById('selectCourseMaster').value;
       if (!cName || !appState.courses[cName]) return;
@@ -723,25 +943,42 @@
         if (p === 5) par5s.push(idx + 10);
       });
 
-      document.getElementById('previewPar3Holes').innerText = par3s.join('H, ') + 'H (ニアピン推奨)';
-      document.getElementById('previewPar5Holes').innerText = par5s.join('H, ') + 'H (ドラコン推奨)';
+      document.getElementById('previewPar3Holes').innerText = par3s.length ? par3s.join('H, ') + 'H' : 'なし';
+      document.getElementById('previewPar5Holes').innerText = par5s.length ? par5s.join('H, ') + 'H' : 'なし';
     }
 
-    // --- 6. 新規コンペ作成ロジック ---
+    // --- 7. 新規コンペ作成 (プルダウンから参加者収集) ---
     function handleCreateNewComp() {
       const name = document.getElementById('newCompName').value.trim() || '新規ゴルフコンペ';
       const date = document.getElementById('newCompDate').value;
       const startHole = parseInt(document.getElementById('newCompStartHole').value, 10);
-      const rawMembers = document.getElementById('newCompMembers').value.trim();
       const courseName = document.getElementById('selectCourseMaster').value || 'カスタムコース';
 
-      const players = rawMembers ? rawMembers.split(/[\n,]+/).map(m => m.trim()).filter(Boolean) : ['選手A', '選手B', '選手C', '選手D'];
+      // プルダウンからプレイヤー名収集 (重複排除 & 順序維持)
+      const selectedPlayers = [];
+      for (let i = 1; i <= 10; i++) {
+        const val = document.getElementById(`selectPlayerSlot_${i}`)?.value;
+        if (val && !selectedPlayers.includes(val)) {
+          selectedPlayers.push(val);
+        }
+      }
 
-      // ホールPar配分の決定
+      if (selectedPlayers.length < 4) {
+        alert('参加プレイヤーを最低4名選択してください。');
+        return;
+      }
+
+      // 偶数化 (奇数名の場合は先頭選手等でペア調整するかアラート)
+      if (selectedPlayers.length % 2 !== 0) {
+        alert('ラスベガス形式のため、偶数名（4名、6名、8名、10名）で選択してください。');
+        return;
+      }
+
+      // ホールPar設定
       let holes = {};
       const cData = appState.courses[courseName];
-      let fPars = [4,5,4,4,3,4,3,4,5]; // デフォルト名神栗東OUT
-      let bPars = [5,4,4,4,3,4,3,4,5]; // デフォルト名神栗東IN
+      let fPars = [4,5,4,4,3,4,3,4,5];
+      let bPars = [5,4,4,4,3,4,3,4,5];
 
       if (cData) {
         const fHalf = document.getElementById('selectHalfFront').value;
@@ -759,7 +996,7 @@
           locked: false,
           scores: {}
         };
-        players.forEach(p => {
+        selectedPlayers.forEach(p => {
           holes[h].scores[p] = {
             strokes: par,
             putts: 2,
@@ -778,12 +1015,11 @@
         date: date,
         startHole: startHole,
         courseName: courseName,
-        players: players,
+        players: selectedPlayers,
         holes: holes,
         createdAt: Date.now()
       };
 
-      // 保存 (ローカル + 履歴)
       localStorage.setItem(`golf_data_${compId}`, JSON.stringify(newCompData));
       
       const history = JSON.parse(localStorage.getItem('golf_comp_history_list') || '[]');
@@ -792,33 +1028,24 @@
         name: name,
         date: date,
         courseName: courseName,
-        players: players
+        players: selectedPlayers
       });
       localStorage.setItem('golf_comp_history_list', JSON.stringify(history));
 
-      // Firestoreへ同期
       if (db) {
         db.collection('golf_comps').doc(compId).set(newCompData).catch(e => console.warn(e));
       }
 
       appState.activeCompId = compId;
       appState.currentComp = newCompData;
-      appState.currentHole = startHole; // INスタートなら10Hへ自動セット
+      appState.currentHole = startHole;
 
-      document.getElementById('modalNewComp').classList.add('hidden');
+      document.getElementById('modalAdmin').classList.add('hidden');
       loadCompHistory();
-      enterScoringView();
-    }
-
-    // --- 7. スコア入力 ＆ ホール制御 ---
-    function enterScoringView() {
-      if (!appState.activeCompId) return;
-      loadActiveCompData();
-      appState.viewMode = 'scoring';
-      appState.currentHole = appState.currentComp?.startHole || 1;
       renderApp();
     }
 
+    // --- 8. スコア入力画面 UI 描画 ---
     function renderHoleSelector() {
       const outRow = document.getElementById('rowHolesOut');
       const inRow = document.getElementById('rowHolesIn');
@@ -848,7 +1075,6 @@
         else inRow.appendChild(btn);
       }
 
-      // バッジ・タイトル更新
       const curData = appState.currentComp.holes[appState.currentHole];
       document.getElementById('badgeCurrentHoleInfo').innerText = `${appState.currentHole}H (Par ${curData?.par || 4})`;
       document.getElementById('cardHoleBadge').innerText = `${appState.currentHole}H`;
@@ -865,14 +1091,16 @@
         titleBadge.classList.add('hidden');
       }
 
-      // ロックボタン状態
       const lockBtn = document.getElementById('btnToggleLock');
+      const scoreCard = document.getElementById('cardScoreInput');
       if (curData?.locked) {
         lockBtn.innerText = '✏️ 修正する';
         lockBtn.className = 'text-xs font-bold px-3 py-1.5 rounded-lg border transition shadow-sm bg-amber-500 border-amber-600 text-white';
+        scoreCard.classList.add('bg-slate-50/80');
       } else {
         lockBtn.innerText = '✓ スコアを確定する';
         lockBtn.className = 'text-xs font-bold px-3 py-1.5 rounded-lg border transition shadow-sm bg-emerald-600 border-emerald-600 text-white';
+        scoreCard.classList.remove('bg-slate-50/80');
       }
     }
 
@@ -892,7 +1120,6 @@
       renderVegasAndStats();
     }
 
-    // プレイヤー入力行の描画
     function renderPlayerInputs() {
       const container = document.getElementById('playerInputList');
       container.innerHTML = '';
@@ -913,9 +1140,9 @@
           <div class="flex items-center space-x-3">
             <!-- 打数カウンター -->
             <div class="flex items-center space-x-1">
-              <button onclick="changeScore('${p}', 'strokes', -1)" class="w-7 h-7 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300">-</button>
-              <span class="w-8 text-center font-bold text-base font-mono">${sc.strokes}</span>
-              <button onclick="changeScore('${p}', 'strokes', 1)" class="w-7 h-7 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300">+</button>
+              <button onclick="changeScore('${p}', 'strokes', -1)" class="w-8 h-8 rounded-lg bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 active:scale-95 transition">-</button>
+              <span class="w-9 text-center font-bold text-lg font-mono">${sc.strokes}</span>
+              <button onclick="changeScore('${p}', 'strokes', 1)" class="w-8 h-8 rounded-lg bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 active:scale-95 transition">+</button>
             </div>
 
             <!-- パット数カウンター -->
@@ -928,8 +1155,8 @@
 
             <!-- 技能賞トグル -->
             <div class="flex items-center space-x-1 pl-2">
-              <button onclick="toggleSkill('${p}', 'sunaIchi')" class="text-[11px] px-2 py-1 rounded font-bold border ${sc.sunaIchi ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200'}">砂イチ</button>
-              <button onclick="toggleSkill('${p}', 'saoIchi')" class="text-[11px] px-2 py-1 rounded font-bold border ${sc.saoIchi ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200'}">竿イチ</button>
+              <button onclick="toggleSkill('${p}', 'sunaIchi')" class="text-[11px] px-2 py-1 rounded font-bold border transition ${sc.sunaIchi ? 'bg-amber-500 text-white border-amber-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}">砂イチ</button>
+              <button onclick="toggleSkill('${p}', 'saoIchi')" class="text-[11px] px-2 py-1 rounded font-bold border transition ${sc.saoIchi ? 'bg-amber-500 text-white border-amber-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200'}">竿イチ</button>
             </div>
           </div>
         `;
@@ -950,7 +1177,6 @@
       if (!appState.currentComp) return;
       const sc = appState.currentComp.holes[appState.currentHole].scores[player];
       sc[key] = !sc[key];
-      // 砂イチONならバンカー連動
       if (key === 'sunaIchi' && sc.sunaIchi) {
         sc.bunker = true;
       }
@@ -967,13 +1193,12 @@
       }
     }
 
-    // --- 8. ラスベガス配当計算 ＆ 集計 ---
+    // --- 9. ラスベガス配当計算 ＆ 集計 ---
     function renderVegasAndStats() {
       if (!appState.currentComp) return;
       const players = appState.currentComp.players;
       const numPairs = Math.floor(players.length / 2);
 
-      // Vegas テーブルヘッダー
       const thead = document.getElementById('vegasTableHead');
       thead.innerHTML = '<th class="p-2 border-r">H</th>';
       for (let pIdx = 1; pIdx <= numPairs; pIdx++) {
@@ -986,18 +1211,14 @@
       let cumulativePoints = {};
       players.forEach(p => cumulativePoints[p] = 0);
 
-      // 18Hループ
       for (let h = 1; h <= 18; h++) {
         const hData = appState.currentComp.holes[h];
         const tr = document.createElement('tr');
-        
-        // 未来ホール・未確定ホールのペア秘匿
         const isFuture = !hData.locked && h > appState.currentHole;
 
         tr.innerHTML = `<td class="p-2 font-bold font-mono border-r bg-slate-50">${h}H</td>`;
 
         if (isFuture) {
-          // 未来のペアはマスク
           for (let pIdx = 0; pIdx < numPairs; pIdx++) {
             tr.innerHTML += `<td colspan="4" class="p-2 text-slate-300 bg-slate-50/50">-- 確定後に表示 --</td>`;
           }
@@ -1005,7 +1226,6 @@
           continue;
         }
 
-        // ペア編成 (固定巡回: 2人ずつ)
         const pairScores = [];
         for (let pIdx = 0; pIdx < numPairs; pIdx++) {
           const p1 = players[pIdx * 2];
@@ -1013,7 +1233,6 @@
           const s1 = hData.scores[p1]?.strokes || hData.par;
           const s2 = hData.scores[p2]?.strokes || hData.par;
 
-          // 2桁点数 (良い方が10の位)
           const low = Math.min(s1, s2);
           const high = Math.max(s1, s2);
           const teamScore = low * 10 + high;
@@ -1021,10 +1240,8 @@
           pairScores.push({ pairIndex: pIdx, p1, p2, s1, s2, teamScore });
         }
 
-        // ラスベガス配当計算 (2〜5ペア対応・タイブレーク山分け)
         calculateVegasPayouts(pairScores, numPairs);
 
-        // レンダリング
         pairScores.forEach(ps => {
           tr.innerHTML += `
             <td class="p-1.5 border-r font-medium">${ps.p1} (${ps.s1})</td>
@@ -1041,7 +1258,6 @@
         tbody.appendChild(tr);
       }
 
-      // 合計ポイントグリッド
       const grid = document.getElementById('vegasTotalPointsGrid');
       grid.innerHTML = '';
       players.forEach(p => {
@@ -1057,18 +1273,14 @@
       renderIndividualTable();
     }
 
-    // 配当テーブルとタイブレーク（山分け）
     function calculateVegasPayouts(pairScores, numPairs) {
-      // スコア昇順ソート
       const sorted = [...pairScores].sort((a, b) => a.teamScore - b.teamScore);
 
-      // 配当プール定義
       let basePool = [1, 0];
       if (numPairs === 3) basePool = [2, 1, 0];
       if (numPairs === 4) basePool = [2, 1, 0, 0];
       if (numPairs >= 5) basePool = [4, 2, 1, 0, 0];
 
-      // 同点グループ化
       let i = 0;
       while (i < sorted.length) {
         let j = i;
@@ -1076,7 +1288,6 @@
           j++;
         }
         const count = j - i;
-        // 配当プールの合計
         let sumP = 0;
         for (let k = i; k < j; k++) {
           sumP += (basePool[k] !== undefined ? basePool[k] : 0);
@@ -1089,7 +1300,6 @@
       }
     }
 
-    // ボーナス集計
     function renderBonusTable() {
       const tbody = document.getElementById('bonusTableBody');
       tbody.innerHTML = '';
@@ -1119,7 +1329,6 @@
       });
     }
 
-    // 個人成績集計
     function renderIndividualTable() {
       const tbody = document.getElementById('individualTableBody');
       tbody.innerHTML = '';
@@ -1135,44 +1344,24 @@
           putts += sc.putts;
         }
         const gross = outStrokes + inStrokes;
+        const mp = appState.masterPlayers.find(m => m.name === p);
+        const hdcp = mp?.hdcp || 0;
+        const net = Math.round((gross - hdcp) * 10) / 10;
+
         tbody.innerHTML += `
           <tr>
             <td class="p-2.5 font-bold text-left">${p}</td>
             <td class="p-2.5 font-mono">${outStrokes}</td>
             <td class="p-2.5 font-mono">${inStrokes}</td>
             <td class="p-2.5 font-bold font-mono text-slate-900">${gross}</td>
-            <td class="p-2.5 font-mono text-slate-400">0</td>
-            <td class="p-2.5 font-bold font-mono text-emerald-700">${gross}</td>
+            <td class="p-2.5 font-mono text-slate-400">${hdcp}</td>
+            <td class="p-2.5 font-bold font-mono text-emerald-700">${net}</td>
             <td class="p-2.5 font-mono">${putts}</td>
           </tr>
         `;
       });
     }
 
-    // --- 9. 生涯成績 (シークレット: ?view=stats) ---
-    function renderLifetimeStats() {
-      const wrapper = document.getElementById('statsRecentFiveBody');
-      wrapper.innerHTML = `
-        <tr>
-          <td class="p-3 font-bold text-left text-white">田中</td>
-          <td class="p-3 font-mono font-bold text-amber-400">84.2</td>
-          <td class="p-3 font-mono">79</td>
-          <td class="p-3 font-mono">31.4</td>
-          <td class="p-3 font-mono">44%</td>
-          <td class="p-3 font-mono">14</td>
-        </tr>
-        <tr>
-          <td class="p-3 font-bold text-left text-white">佐藤</td>
-          <td class="p-3 font-mono font-bold text-amber-400">88.6</td>
-          <td class="p-3 font-mono">82</td>
-          <td class="p-3 font-mono">33.0</td>
-          <td class="p-3 font-mono">36%</td>
-          <td class="p-3 font-mono">12</td>
-        </tr>
-      `;
-    }
-
-    // タブ切替
     function switchTab(tabKey) {
       appState.activeTab = tabKey;
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1190,27 +1379,26 @@
     // --- 10. 全体画面切り替えレンダラー ---
     function renderApp() {
       // プレイヤービュー時の幹事ボタン隠蔽
-      if (appState.viewMode === 'player') {
+      if (appState.isPlayerMode) {
         document.getElementById('btnAdminSetting').classList.add('hidden');
       } else {
         document.getElementById('btnAdminSetting').classList.remove('hidden');
       }
 
-      document.getElementById('viewAdminDashboard').classList.add('hidden');
+      document.getElementById('viewNoCompSelected').classList.add('hidden');
       document.getElementById('viewScoring').classList.add('hidden');
       document.getElementById('viewLifetimeStats').classList.add('hidden');
 
       if (appState.viewMode === 'stats') {
         document.getElementById('viewLifetimeStats').classList.remove('hidden');
-        renderLifetimeStats();
-      } else if (appState.viewMode === 'scoring' && appState.activeCompId) {
+      } else if (appState.activeCompId && appState.currentComp) {
         document.getElementById('viewScoring').classList.remove('hidden');
         renderHoleSelector();
         renderPlayerInputs();
         renderVegasAndStats();
       } else {
-        // デフォルト: 幹事ダッシュボード
-        document.getElementById('viewAdminDashboard').classList.remove('hidden');
+        // 未選択状態
+        document.getElementById('viewNoCompSelected').classList.remove('hidden');
       }
     }
   </script>
