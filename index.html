@@ -3963,19 +3963,39 @@ function App() {
                 <div className="space-y-2.5">
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                     <h3 className="font-bold text-emerald-800 text-xs mb-1">1. 組内ラスベガスゲームの配当</h3>
-                    <p className="text-[11px] mb-1">
+                    <p className="text-[11px] mb-1.5">
                       ペア2名のネット打数を昇順で並べた2桁数字（例: 4打と5打 ➔ 45点）が小さいチームが勝利！
                     </p>
-                    <ul className="text-[11px] space-y-1 bg-white p-2 rounded border border-slate-200">
-                      <li>・<b>2ペア (4人1組)</b>: 1位 <b>各1P</b> / 2位 0P</li>
-                      <li>・<b>3〜4ペア (5〜8名)</b>: 1位 <b>各2P</b> / 2位 <b>各1P</b></li>
-                    </ul>
+                    <div className="space-y-1 bg-white p-2 rounded border border-slate-200 text-[11px]">
+                      <div className="flex justify-between border-b pb-0.5 font-bold text-slate-700">
+                        <span>チーム構成 (参加人数)</span>
+                        <span>獲得ポイント (各メンバー)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>・<b>2ペア (4名/1組)</b>:</span>
+                        <span>1位 <b>各1P</b> / 2位 0P</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>・<b>3ペア (5〜6名)</b>:</span>
+                        <span>1位 <b>各2P</b> / 2位 <b>各1P</b> / 3位 0P</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>・<b>4ペア (7〜8名)</b>:</span>
+                        <span>1位 <b>各2P</b> / 2位 <b>各1P</b> / 3〜4位 0P</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>・<b>5ペア (9〜10名)</b>:</span>
+                        <span>1位 <b>各4P</b> / 2位 <b>各2P</b> / 3位 <b>各1P</b> / 4〜5位 0P</span>
+                      </div>
+                    </div>
                   </div>
                   <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-300">
-                    <h3 className="font-bold text-amber-950 text-xs mb-1">2. 同点（タイ）時の山分け計算</h3>
-                    <p className="text-[11px] text-slate-700">
-                      同じチーム点数で並んだ場合、該当順位のポイントを合計して同点チーム数で均等に山分け配当します。<br/>
-                      <b>例 (2ペア対決時)</b>: 1位(1P)と2位(0P)を山分け ➔ <b>両チーム各 0.5P ずつ獲得</b>
+                    <h3 className="font-bold text-amber-950 text-xs mb-1">2. 同点（タイ）時の山分けルール</h3>
+                    <p className="text-[11px] text-slate-700 leading-relaxed">
+                      同じチーム点数で並んだ場合、該当する順位のポイントを合算して同点チーム数で均等に山分け配当します。<br/>
+                      ・<b>2ペア（4名）で1位タイ</b>: 1位(1P)＋2位(0P)＝1P ➔ <b>両チーム各 0.5P</b><br/>
+                      ・<b>3〜4ペアで1位タイ</b>: 1位(2P)＋2位(1P)＝3P ➔ <b>両チーム各 1.5P</b> (3位以下0P)<br/>
+                      ・<b>3〜4ペアで2位タイ</b>: 2位(1P)＋3位(0P)＝1P ➔ 1位各2P、<b>2位タイ各 0.5P</b>
                     </p>
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
