@@ -73,7 +73,7 @@ const { useState, useEffect, useMemo, useRef } = React;
 
 const SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRPgIinMkrq4_mowlS6n_iCegE8NxQRg0DSMAuxjcOa3483c6v9SKCL776tRr62dzpCj2mCbgFag97m/pub?gid=0&single=true&output=csv";
 
-// 更新されたベガス配当テーブル: 2ペア=1P, 3ペア=2P/1P, 4ペア=2P/1P
+// ベガス配当テーブル: 2ペア=1P, 3ペア=2P/1P, 4ペア=2P/1P
 const VEGAS_PAYOUT_TABLE = {
   2:  [1],          // 2ペア(4名): 1位 1P, 2位 0P (引き分け各0.5P)
   3:  [2, 1],       // 3ペア(5-6名): 1位 2P, 2位 1P, 3位 0P
@@ -113,7 +113,7 @@ function App() {
   });
 
   const [compName, setCompName] = useState(() => {
-    return compId ? (localStorage.getItem(`golf_comp_name_${compId}`) || '親睦ゴルフコンペ') : '';
+    return compId ? (localStorage.getItem(`golf_comp_name_${compId}`) || '練習ラウンド') : '';
   });
 
   const [compDate, setCompDate] = useState(() => {
@@ -181,14 +181,15 @@ function App() {
   const [sortField, setSortField] = useState('finalP');
   const [sortAsc, setSortAsc] = useState(false);
 
+  // 1名〜20名まで対応
   const [playerCount, setPlayerCount] = useState(() => {
     if (compId) {
       const local = localStorage.getItem(`golf_data_${compId}`);
       if (local) {
-        try { return JSON.parse(local).playerCount || 4; } catch(e){}
+        try { return JSON.parse(local).playerCount || 1; } catch(e){}
       }
     }
-    return 4;
+    return 1;
   });
 
   const [players, setPlayers] = useState(() => {
@@ -295,6 +296,7 @@ function App() {
   });
   const [newCompPar3, setNewCompPar3] = useState([0, 0, 0, 0]);
   const [newCompPar5, setNewCompPar5] = useState([0, 0, 0, 0]);
+  const [newCompPlayerCount, setNewCompPlayerCount] = useState(1);
 
   const [selectedCourseName, setSelectedCourseName] = useState('');
   const [selectedFrontHalf, setSelectedFrontHalf] = useState('');
@@ -605,11 +607,14 @@ function App() {
     });
   }, [players, playerCount, playerMaster]);
 
+  // ベガス勝負対象（本戦参加者が4名以上、または2名以上の場合のみペア編成）
   const vegasActivePlayers = useMemo(() => {
     const compHumans = activePlayers.filter(p => !p.isOpenPlayer);
-    const list = [...compHumans];
+    // 1名以下の場合はベガス不成立
+    if (compHumans.length <= 1) return [];
 
-    if (list.length > 0 && list.length % 2 !== 0) {
+    const list = [...compHumans];
+    if (list.length % 2 !== 0) {
       list.push({
         id: 'ghost_dummy',
         name: '👻 ゴースト (欠席枠)',
@@ -624,7 +629,7 @@ function App() {
 
   useEffect(() => {
     const ids = vegasActivePlayers.map(p => p.id);
-    if (h1RandomOrder.length !== ids.length || !h1RandomOrder.every(id => ids.includes(id))) {
+    if (ids.length > 0 && (h1RandomOrder.length !== ids.length || !h1RandomOrder.every(id => ids.includes(id)))) {
       const shuffled = [...ids].sort(() => Math.random() - 0.5);
       setH1RandomOrder(shuffled);
     }
@@ -901,6 +906,8 @@ function App() {
 
   const vegasSortedRank = useMemo(() => {
     const rankMap = {};
+    if (vegasActivePlayers.length < 2) return rankMap;
+
     const firstHoleNum = startCourse === 'IN' ? 10 : 1;
 
     for (let h = 1; h <= 18; h++) {
@@ -1080,6 +1087,8 @@ function App() {
   const totalVegasPMap = useMemo(() => {
     const totalVegasP = {};
     activePlayers.forEach(p => { totalVegasP[p.id] = 0; });
+    if (vegasActivePlayers.length < 2) return totalVegasP;
+
     for (let h = 1; h <= 18; h++) {
       const v = calculateVegasPointsForHole(h);
       activePlayers.forEach(p => {
@@ -1280,6 +1289,7 @@ function App() {
     setNewCompDateInput(`${now.getFullYear()}-${('0'+(now.getMonth()+1)).slice(-2)}-${('0'+now.getDate()).slice(-2)}`);
     setNewCompPar3([0, 0, 0, 0]);
     setNewCompPar5([0, 0, 0, 0]);
+    setNewCompPlayerCount(1); // 1名から作成可能
 
     const cNames = Object.keys(courseMasterList);
     if (cNames.length > 0) {
@@ -1302,7 +1312,7 @@ function App() {
 
   const handleCreateNewComp = () => {
     if (!newCompNameInput.trim()) {
-      showToast('コンペ名を入力してください');
+      showToast('ラウンド・コンペ名を入力してください');
       return;
     }
     const newId = 'comp_' + Date.now();
@@ -1313,7 +1323,7 @@ function App() {
     
     const freshPlayers = Array.from({ length: 20 }, (_, i) => createEmptySlot(i));
     setPlayers(freshPlayers);
-    setPlayerCount(4);
+    setPlayerCount(newCompPlayerCount);
 
     setPar3Holes(newCompPar3);
     setPar5Holes(newCompPar5);
@@ -1332,7 +1342,7 @@ function App() {
       compName: newCompNameInput.trim(),
       compDate: newCompDateInput,
       startCourse: newCompStartCourse,
-      playerCount: 4,
+      playerCount: newCompPlayerCount,
       players: freshPlayers,
       par3Holes: newCompPar3,
       par5Holes: newCompPar5,
@@ -1341,7 +1351,7 @@ function App() {
       titleWinners: {}
     });
 
-    showToast(`新コンペ「${newCompNameInput.trim()}」を作成しました！`);
+    showToast(`「${newCompNameInput.trim()}」を作成しました！`);
   };
 
   const handleSelectHistoryComp = (histItem) => {
@@ -1413,13 +1423,13 @@ function App() {
   const handleStartCompetition = () => {
     const ids = vegasActivePlayers.map(p => p.id);
     let finalOrder = [...h1RandomOrder];
-    if (finalOrder.length !== ids.length || !finalOrder.every(id => ids.includes(id))) {
+    if (ids.length > 0 && (finalOrder.length !== ids.length || !finalOrder.every(id => ids.includes(id)))) {
       finalOrder = [...ids].sort(() => Math.random() - 0.5);
       setH1RandomOrder(finalOrder);
     }
     setIsCompStarted(true);
     saveData(true, { isCompStarted: true, h1RandomOrder: finalOrder });
-    showToast(`🚀 コンペを開始しました！${startCourse === 'IN' ? '10' : '1'}番ホールのチームが確定しました。`);
+    showToast(`🚀 ラウンドを開始しました！`);
   };
 
   const handleOpenMergeModal = () => {
@@ -1556,7 +1566,7 @@ function App() {
         if (refPar3Holes.every(h => h === 0) && cData.par3Holes) refPar3Holes = cData.par3Holes;
         if (refPar5Holes.every(h => h === 0) && cData.par5Holes) refPar5Holes = cData.par5Holes;
 
-        const count = cData.playerCount || 4;
+        const count = cData.playerCount || 1;
         const cPlayers = (cData.players || []).slice(0, count);
 
         cPlayers.forEach(p => {
@@ -2065,7 +2075,7 @@ function App() {
 
               {currentStats.roundCount === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
-                  指定期間のラウンド履歴データがありません。<br/>コンペでスコアを入力すると自動蓄積されます。
+                  指定期間のラウンド履歴データがありません。<br/>コンペ・練習ラウンドでスコアを入力すると自動蓄積されます。
                 </div>
               ) : (
                 <>
@@ -2380,15 +2390,15 @@ function App() {
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center space-y-3 shadow-xs">
                 <span className="text-3xl">⛳️</span>
                 <div>
-                  <h2 className="text-base font-black text-emerald-950">コンペ管理ホーム</h2>
-                  <p className="text-xs text-slate-500 mt-1">新規コンペを作成するか、過去の履歴から選んで開いてください。</p>
+                  <h2 className="text-base font-black text-emerald-950">コンペ・ラウンド管理ホーム</h2>
+                  <p className="text-xs text-slate-500 mt-1">新規ラウンドを作成するか、過去の履歴から選んで開いてください。</p>
                 </div>
                 <button
                   onClick={handleOpenNewCompModal}
                   className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 px-4 rounded-xl text-sm shadow-md transition flex items-center justify-center gap-1.5"
                 >
                   <span>＋</span>
-                  <span>新しいコンペを作成する</span>
+                  <span>新しいラウンドを作成する</span>
                 </button>
               </div>
 
@@ -2396,7 +2406,7 @@ function App() {
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-2.5">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
                     <span>📁</span>
-                    <span>保存済みのコンペ履歴 ({compHistory.length}件)</span>
+                    <span>保存済みの履歴 ({compHistory.length}件)</span>
                   </span>
                   <div className="divide-y divide-slate-100">
                     {compHistory.map(item => (
@@ -2427,7 +2437,7 @@ function App() {
                 </div>
               ) : (
                 <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-dashed">
-                  過去のコンペ履歴はありません。
+                  過去のラウンド履歴はありません。
                 </div>
               )}
             </div>
@@ -2442,7 +2452,7 @@ function App() {
                     >
                       ◀ ホームへ
                     </button>
-                    <span className="text-xs font-bold text-slate-800">コンペ情報</span>
+                    <span className="text-xs font-bold text-slate-800">ラウンド情報</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -2463,7 +2473,7 @@ function App() {
 
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2">
-                    <label className="text-[10px] font-bold text-slate-500 block mb-1">コンペ名:</label>
+                    <label className="text-[10px] font-bold text-slate-500 block mb-1">名称:</label>
                     <input
                       type="text"
                       value={compName}
@@ -2581,16 +2591,16 @@ function App() {
                 </div>
               </div>
 
-              {/* 参加人数 */}
+              {/* 参加人数（1名〜20名対応） */}
               <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-emerald-950 block">参加人数（4〜20名）</span>
-                    <span className="text-[11px] text-slate-500">※オープン参加者も含めた総人数を設定</span>
+                    <span className="text-xs font-bold text-emerald-950 block">参加人数（1〜20名）</span>
+                    <span className="text-[11px] text-slate-500">※1名での練習ラウンドにも対応</span>
                   </div>
                   <div className="flex items-center space-x-3 bg-white px-2.5 py-1 rounded-lg border border-emerald-300">
                     <button
-                      onClick={() => setPlayerCount(c => Math.max(4, c - 1))}
+                      onClick={() => setPlayerCount(c => Math.max(1, c - 1))}
                       className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded flex items-center justify-center text-sm"
                     >
                       -
@@ -2688,24 +2698,26 @@ function App() {
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-sm shadow-md transition flex items-center justify-center gap-1.5"
                   >
                     <span>🚀</span>
-                    <span>コンペを開始する（{startCourse === 'IN' ? '10' : '1'}Hチーム確定）</span>
+                    <span>ラウンドを開始する</span>
                   </button>
                 ) : (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between border-b pb-2">
                       <span className="text-xs font-black text-emerald-800">
-                        コンペ進行中（{startCourse}スタート / 確定済）
+                        ラウンド進行中（{startCourse}スタート）
                       </span>
-                      <button
-                        onClick={() => {
-                          if (confirm('チームを再抽選してコンペを再スタートしますか？')) {
-                            handleStartCompetition();
-                          }
-                        }}
-                        className="text-[10px] text-slate-400 hover:text-slate-600 underline"
-                      >
-                        再抽選
-                      </button>
+                      {vegasActivePlayers.length >= 2 && (
+                        <button
+                          onClick={() => {
+                            if (confirm('チームを再抽選してラウンドを再スタートしますか？')) {
+                              handleStartCompetition();
+                            }
+                          }}
+                          className="text-[10px] text-slate-400 hover:text-slate-600 underline"
+                        >
+                          再抽選
+                        </button>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -2793,7 +2805,7 @@ function App() {
               <div className="flex items-center justify-between border-b pb-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                   <span>🗑️</span>
-                  <span>コンペ履歴の削除オプション</span>
+                  <span>履歴の削除オプション</span>
                 </h3>
                 <button
                   onClick={() => setDeleteTargetItem(null)}
@@ -2806,7 +2818,7 @@ function App() {
               <div className="text-xs text-slate-700 space-y-1">
                 <p className="font-bold text-slate-900">対象: {deleteTargetItem.name}</p>
                 <p className="text-[11px] text-slate-500">日付: {deleteTargetItem.date} ({deleteTargetItem.startCourse || 'OUT'}発)</p>
-                <p className="pt-1">このコンペのデータをどのように処理しますか？</p>
+                <p className="pt-1">このラウンドデータをどのように処理しますか？</p>
               </div>
 
               <div className="space-y-2 pt-1">
@@ -2832,7 +2844,7 @@ function App() {
                     <span>完全削除（生涯スコアからも抹消）</span>
                   </div>
                   <p className="text-[10px] text-red-600 mt-1 leading-normal">
-                    コンペ一覧および生涯成績からも完全に抹消します。（テスト入力や誤入力のリセット用）
+                    一覧および生涯成績からも完全に抹消します。（テスト入力や誤入力のリセット用）
                   </p>
                 </button>
               </div>
@@ -3084,14 +3096,14 @@ function App() {
           </div>
         )}
 
-        {/* ＋ 新規コンペ作成モーダル */}
+        {/* ＋ 新規コンペ・ラウンド作成モーダル (1名〜20名対応) */}
         {showNewCompModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b pb-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                   <span>🏆</span>
-                  <span>新規コンペの作成</span>
+                  <span>新規ラウンド・コンペ作成</span>
                 </h3>
                 <button
                   onClick={() => setShowNewCompModal(false)}
@@ -3102,24 +3114,46 @@ function App() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">コンペ名 <span className="text-red-500">*</span></label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">名称 <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={newCompNameInput}
                   onChange={(e) => setNewCompNameInput(e.target.value)}
-                  placeholder="例: 第2回 親睦ゴルフコンペ"
+                  placeholder="例: 栗東練習ラウンド / 第2回 菊花杯"
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold text-slate-800"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">開催日</label>
-                <input
-                  type="date"
-                  value={newCompDateInput}
-                  onChange={(e) => setNewCompDateInput(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold text-slate-800"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">開催日</label>
+                  <input
+                    type="date"
+                    value={newCompDateInput}
+                    onChange={(e) => setNewCompDateInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">参加人数</label>
+                  <div className="flex items-center space-x-2 bg-slate-50 border border-slate-300 rounded p-1">
+                    <button
+                      type="button"
+                      onClick={() => setNewCompPlayerCount(c => Math.max(1, c - 1))}
+                      className="w-7 h-7 bg-white text-slate-700 font-bold rounded border border-slate-200 flex items-center justify-center text-xs"
+                    >
+                      -
+                    </button>
+                    <span className="flex-1 text-center font-bold text-xs text-emerald-800">{newCompPlayerCount}名</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewCompPlayerCount(c => Math.min(20, c + 1))}
+                      className="w-7 h-7 bg-white text-slate-700 font-bold rounded border border-slate-200 flex items-center justify-center text-xs"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -3150,6 +3184,7 @@ function App() {
                 </div>
               </div>
 
+              {/* スプレッドシート連携 コースプリセット選択 */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -3693,7 +3728,7 @@ function App() {
                               </button>
                             </div>
 
-                            {/* ハザード・ペナルティトグル (更新) */}
+                            {/* ハザード・ペナルティトグル */}
                             <div className="grid grid-cols-2 gap-1.5">
                               <button
                                 onClick={() => updateHoleScore(player.id, 'ob', !data.ob)}
@@ -3764,7 +3799,9 @@ function App() {
         <div className="flex-1 p-3 space-y-3">
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="p-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <span className="text-xs font-black text-slate-800">総合リーダーボード</span>
+              <span className="text-xs font-black text-slate-800">
+                {playerCount === 1 ? 'スコアカード' : '総合リーダーボード'}
+              </span>
               <span className="text-[10px] text-slate-400">列タップで並び替え</span>
             </div>
             <div className="overflow-x-auto">
@@ -3783,21 +3820,21 @@ function App() {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {leaderboardData.map((row, idx) => {
                     if (row.player.isGhost) return null;
-                    const isOp = row.player.isOpenPlayer;
+                    const isOp = row.player.isOpenPlayer || playerCount === 1;
                     return (
-                      <tr key={row.player.id} className={`transition ${isOp ? 'bg-amber-50/40 text-slate-500' : 'hover:bg-slate-50'}`}>
+                      <tr key={row.player.id} className={`transition ${row.player.isOpenPlayer ? 'bg-amber-50/40 text-slate-500' : 'hover:bg-slate-50'}`}>
                         <td className="p-2 text-center font-bold text-slate-400">
-                          {isOp ? <span className="text-[10px] text-amber-700">参考</span> : idx + 1}
+                          {row.player.isOpenPlayer ? <span className="text-[10px] text-amber-700">参考</span> : idx + 1}
                         </td>
                         <td className="p-2 font-bold text-slate-800">
                           {row.player.name}
-                          {isOp && <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-normal">オープン</span>}
+                          {row.player.isOpenPlayer && <span className="ml-1 text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-normal">オープン</span>}
                         </td>
-                        <td className="p-2 text-right font-black text-emerald-700">{isOp ? '-' : `${row.finalP}P`}</td>
+                        <td className="p-2 text-right font-black text-emerald-700">{row.player.isOpenPlayer ? '-' : `${row.finalP}P`}</td>
                         <td className="p-2 text-right font-bold text-blue-700">{row.net}</td>
                         <td className="p-2 text-right text-slate-600">{row.gross}</td>
-                        <td className="p-2 text-right text-blue-600">{isOp ? '-' : row.bonusCount}</td>
-                        <td className="p-2 text-right text-red-600">{isOp ? '-' : row.penCount}</td>
+                        <td className="p-2 text-right text-blue-600">{row.player.isOpenPlayer ? '-' : row.bonusCount}</td>
+                        <td className="p-2 text-right text-red-600">{row.player.isOpenPlayer ? '-' : row.penCount}</td>
                       </tr>
                     );
                   })}
@@ -3844,9 +3881,9 @@ function App() {
 
           {rankingSubTab === 'vegas' && (
             <div className="space-y-3">
-              {vegasActivePlayers.length === 0 ? (
+              {vegasActivePlayers.length < 2 ? (
                 <div className="bg-white rounded-xl p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200">
-                  全員オープン参加のため、本戦ベガス勝負はありません（通常スコア集計中）。
+                  {playerCount === 1 ? '1名練習ラウンドのため、ベガス競技はありません（スコア・スタッツを記録中）。' : '全員オープン参加のため、本戦ベガス勝負はありません（通常スコア集計中）。'}
                 </div>
               ) : (
                 holeConfig.map(h => {
@@ -4147,7 +4184,7 @@ function App() {
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
             <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <span>📖 コンペ公式ルール説明</span>
+                <span>📖 コンペ・ラウンド公式ルール説明</span>
               </h2>
               <button
                 onClick={() => setShowRuleModal(false)}
@@ -4187,7 +4224,7 @@ function App() {
                     <p className="text-[11px]">
                       ・OUTスタート組は1Hから、INスタート組は10Hからスタートします。<br/>
                       ・入力画面のホール番号バーは進行順に上段・下段が配置されます。<br/>
-                      ・最初のホール（OUT:1H / IN:10H）のチームは事前抽選で固定され、2ホール目以降は前ホールの成績順で自動編成されます。
+                      ・1名での練習ラウンドから最大20名のコンペまで幅広く記録可能です。
                     </p>
                   </div>
                   <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200">
