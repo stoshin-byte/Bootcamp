@@ -11,6 +11,12 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel Standalone for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- 確実に同期が通る Firebase CDN (v10 Compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
   <style>
     body {
       -webkit-tap-highlight-color: transparent;
@@ -30,12 +36,8 @@
 
 <div id="root"></div>
 
-<!-- Firebase SDK Imports (v11.6.1) -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-  import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+<script>
+  // Firebase初期化を確実に実行
   const firebaseConfig = {
     apiKey: "AIzaSyAHY5FtpLE8FCI0fr9oJpOAILoQRIs6Tv4",
     authDomain: "bootcamp-a4d13.firebaseapp.com",
@@ -46,24 +48,24 @@
   };
 
   try {
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
 
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-        window.__FIREBASE_ACTIVE = true;
+    auth.signInAnonymously()
+      .then(() => {
         window.__FIREBASE_DB = db;
-        window.dispatchEvent(new CustomEvent('firebase-ready'));
-      } catch (e) {
-        console.warn("Auth initialization error:", e);
+        window.__FIREBASE_ACTIVE = true;
+        window.dispatchEvent(new CustomEvent('firebase-connected'));
+      })
+      .catch((err) => {
+        console.error("Firebase Auth Error:", err);
+        window.__FIREBASE_ACTIVE = false;
         window.dispatchEvent(new CustomEvent('firebase-offline'));
-      }
-    };
-    initAuth();
-  } catch (err) {
-    console.warn("Firebase setup notice:", err);
+      });
+  } catch (e) {
+    console.error("Firebase Init Error:", e);
+    window.__FIREBASE_ACTIVE = false;
     window.dispatchEvent(new CustomEvent('firebase-offline'));
   }
 </script>
@@ -175,7 +177,7 @@ function App() {
   const [mainTab, setMainTab] = useState('input');
   const [rankingSubTab, setRankingSubTab] = useState('vegas');
   const [selectedIndividualPlayerId, setSelectedIndividualPlayerId] = useState('p1');
-  const [syncStatus, setSyncStatus] = useState('local');
+  const [syncStatus, setSyncStatus] = useState(window.__FIREBASE_ACTIVE ? 'synced' : 'local');
 
   const [sortField, setSortField] = useState('finalP');
   const [sortAsc, setSortAsc] = useState(false);
@@ -375,17 +377,16 @@ function App() {
     fetchSpreadsheetCourses(true);
   }, []);
 
-  // 1. クラウド同期: 全システムデータ（名簿マスタ、コンペ履歴、生涯成績）の受信リスナー
+  // 1. 全システムデータ（名簿・履歴・生涯成績）のリアルタイム受信
   useEffect(() => {
     let unsubs = [];
-    const setupGlobalSync = async () => {
+
+    const startGlobalSync = () => {
       if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) return;
       const db = window.__FIREBASE_DB;
-      const fLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
 
-      // 名簿マスタ受信
-      const unsubMaster = fLib.onSnapshot(fLib.doc(db, 'golf_system', 'player_master'), (snap) => {
-        if (snap.exists() && snap.data().list) {
+      const unsubMaster = db.collection('golf_system').doc('player_master').onSnapshot((snap) => {
+        if (snap.exists && snap.data().list) {
           isRemoteUpdatingRef.current = true;
           setPlayerMaster(snap.data().list);
           localStorage.setItem('golf_player_master_list', JSON.stringify(snap.data().list));
@@ -394,9 +395,8 @@ function App() {
       });
       unsubs.push(unsubMaster);
 
-      // コンペ履歴受信
-      const unsubHist = fLib.onSnapshot(fLib.doc(db, 'golf_system', 'comp_history'), (snap) => {
-        if (snap.exists() && snap.data().list) {
+      const unsubHist = db.collection('golf_system').doc('comp_history').onSnapshot((snap) => {
+        if (snap.exists && snap.data().list) {
           isRemoteUpdatingRef.current = true;
           setCompHistory(snap.data().list);
           localStorage.setItem('golf_comp_history_list', JSON.stringify(snap.data().list));
@@ -405,9 +405,8 @@ function App() {
       });
       unsubs.push(unsubHist);
 
-      // 生涯成績アーカイブ受信
-      const unsubArchive = fLib.onSnapshot(fLib.doc(db, 'golf_system', 'player_gross_archive'), (snap) => {
-        if (snap.exists() && snap.data().data) {
+      const unsubArchive = db.collection('golf_system').doc('player_gross_archive').onSnapshot((snap) => {
+        if (snap.exists && snap.data().data) {
           isRemoteUpdatingRef.current = true;
           setGrossArchive(snap.data().data);
           localStorage.setItem('golf_player_gross_archive', JSON.stringify(snap.data().data));
@@ -415,14 +414,16 @@ function App() {
         }
       });
       unsubs.push(unsubArchive);
+
+      setSyncStatus('synced');
     };
 
-    window.addEventListener('firebase-ready', setupGlobalSync);
-    if (window.__FIREBASE_ACTIVE) setupGlobalSync();
+    window.addEventListener('firebase-connected', startGlobalSync);
+    if (window.__FIREBASE_ACTIVE) startGlobalSync();
 
     return () => {
       unsubs.forEach(u => u && u());
-      window.removeEventListener('firebase-ready', setupGlobalSync);
+      window.removeEventListener('firebase-connected', startGlobalSync);
     };
   }, []);
 
@@ -430,11 +431,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('golf_player_master_list', JSON.stringify(playerMaster));
     if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
-      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        const db = window.__FIREBASE_DB;
-        const ref = fLib.doc(db, 'golf_system', 'player_master');
-        fLib.setDoc(ref, { list: playerMaster, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
-      });
+      window.__FIREBASE_DB.collection('golf_system').doc('player_master').set(
+        { list: playerMaster, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(err => console.warn(err));
     }
   }, [playerMaster]);
 
@@ -442,11 +442,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('golf_comp_history_list', JSON.stringify(compHistory));
     if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
-      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        const db = window.__FIREBASE_DB;
-        const ref = fLib.doc(db, 'golf_system', 'comp_history');
-        fLib.setDoc(ref, { list: compHistory, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
-      });
+      window.__FIREBASE_DB.collection('golf_system').doc('comp_history').set(
+        { list: compHistory, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(err => console.warn(err));
     }
   }, [compHistory]);
 
@@ -454,11 +453,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('golf_player_gross_archive', JSON.stringify(grossArchive));
     if (window.__FIREBASE_ACTIVE && window.__FIREBASE_DB && !isRemoteUpdatingRef.current) {
-      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        const db = window.__FIREBASE_DB;
-        const ref = fLib.doc(db, 'golf_system', 'player_gross_archive');
-        fLib.setDoc(ref, { data: grossArchive, updatedAt: Date.now() }, { merge: true }).catch(err => console.warn(err));
-      });
+      window.__FIREBASE_DB.collection('golf_system').doc('player_gross_archive').set(
+        { data: grossArchive, updatedAt: Date.now() },
+        { merge: true }
+      ).catch(err => console.warn(err));
     }
   }, [grossArchive]);
 
@@ -495,58 +493,51 @@ function App() {
     });
   }, [par3Holes, par5Holes]);
 
-  // 2. 開いているコンペの双方向同期（相手端末の勝手な初期化上書きを完全防御）
+  // 2. 開いているコンペの双方向リアルタイム同期
   useEffect(() => {
     if (!compId) return;
     let unsubscribeComp = null;
 
-    const setupSync = () => {
-      if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) {
-        setSyncStatus('local');
-        return;
-      }
+    const setupCompSync = () => {
+      if (!window.__FIREBASE_ACTIVE || !window.__FIREBASE_DB) return;
       const db = window.__FIREBASE_DB;
-      
-      import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js").then((fLib) => {
-        const refComp = fLib.doc(db, 'golf_comps', compId);
-        unsubscribeComp = fLib.onSnapshot(refComp, (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            isRemoteUpdatingRef.current = true;
-            if (data.compName) setCompName(data.compName);
-            if (data.compDate) setCompDate(data.compDate);
-            if (data.startCourse) setStartCourse(data.startCourse);
-            if (data.playerCount !== undefined) setPlayerCount(data.playerCount);
-            if (data.players && Array.isArray(data.players)) setPlayers(data.players);
-            if (data.par3Holes) setPar3Holes(data.par3Holes);
-            if (data.par5Holes) setPar5Holes(data.par5Holes);
-            if (data.isCompStarted !== undefined) setIsCompStarted(data.isCompStarted);
-            if (data.titleWinners) setTitleWinners(data.titleWinners);
-            if (data.scores) setScores(data.scores);
-            if (data.h1RandomOrder) setH1RandomOrder(data.h1RandomOrder);
-            
-            isCompLoadedFromCloudRef.current = true;
-            setTimeout(() => { isRemoteUpdatingRef.current = false; }, 150);
-            setSyncStatus('synced');
-          } else {
-            // クラウドに存在せず、かつ幹事モードの場合のみ新規作成保存
-            if (viewMode === 'admin') {
-              saveData(false);
-            }
+
+      unsubscribeComp = db.collection('golf_comps').doc(compId).onSnapshot((snap) => {
+        if (snap.exists) {
+          const data = snap.data();
+          isRemoteUpdatingRef.current = true;
+          if (data.compName) setCompName(data.compName);
+          if (data.compDate) setCompDate(data.compDate);
+          if (data.startCourse) setStartCourse(data.startCourse);
+          if (data.playerCount !== undefined) setPlayerCount(data.playerCount);
+          if (data.players && Array.isArray(data.players)) setPlayers(data.players);
+          if (data.par3Holes) setPar3Holes(data.par3Holes);
+          if (data.par5Holes) setPar5Holes(data.par5Holes);
+          if (data.isCompStarted !== undefined) setIsCompStarted(data.isCompStarted);
+          if (data.titleWinners) setTitleWinners(data.titleWinners);
+          if (data.scores) setScores(data.scores);
+          if (data.h1RandomOrder) setH1RandomOrder(data.h1RandomOrder);
+          
+          isCompLoadedFromCloudRef.current = true;
+          setTimeout(() => { isRemoteUpdatingRef.current = false; }, 150);
+          setSyncStatus('synced');
+        } else {
+          if (viewMode === 'admin') {
+            saveData(false);
           }
-        }, (err) => {
-          console.warn("Firestore comp sync error:", err);
-          setSyncStatus('error');
-        });
+        }
+      }, (err) => {
+        console.warn("Comp sync error:", err);
+        setSyncStatus('error');
       });
     };
 
-    window.addEventListener('firebase-ready', setupSync);
-    if (window.__FIREBASE_ACTIVE) setupSync();
+    window.addEventListener('firebase-connected', setupCompSync);
+    if (window.__FIREBASE_ACTIVE) setupCompSync();
 
     return () => {
       if (unsubscribeComp) unsubscribeComp();
-      window.removeEventListener('firebase-ready', setupSync);
+      window.removeEventListener('firebase-connected', setupCompSync);
     };
   }, [compId]);
 
@@ -599,7 +590,6 @@ function App() {
 
   const saveData = async (isManualChange = true, extraPayload = {}) => {
     if (!compId) return;
-    // 相手端末がクラウドからの初回受信を完了していない時は上書き保存を防止
     if (viewMode === 'player' && !isCompLoadedFromCloudRef.current && !isManualChange) return;
 
     const payload = {
@@ -631,11 +621,7 @@ function App() {
 
     setSyncStatus('syncing');
     try {
-      const fLib = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
-      const db = window.__FIREBASE_DB;
-      const docRef = fLib.doc(db, 'golf_comps', compId);
-      
-      await fLib.setDoc(docRef, payload, { merge: true });
+      await window.__FIREBASE_DB.collection('golf_comps').doc(compId).set(payload, { merge: true });
       setSyncStatus('synced');
     } catch (err) {
       console.warn("Save error:", err);
@@ -652,7 +638,6 @@ function App() {
     return () => clearTimeout(timer);
   }, [compName, compDate, startCourse, playerCount, players, par3Holes, par5Holes, isCompStarted, titleWinners, scores, h1RandomOrder]);
 
-  // 相手スマホに名簿マスタがなくても、コンペ保存時の名前を最優先で表示
   const activePlayers = useMemo(() => {
     return players.slice(0, playerCount).map((p, idx) => {
       let displayName = p.name ? p.name.trim() : '';
@@ -1770,7 +1755,7 @@ function App() {
     showToast('選手を名簿から削除しました');
   };
 
-  // 名簿選択時に、選手名をコンペデータに直接固定（相手スマホへの完全同期）
+  // 名簿選択時に、選手名をコンペデータに直接固定
   const handleAssignPlayer = (slotIndex, masterId) => {
     if (!masterId) {
       setPlayers(prev => {
@@ -1991,9 +1976,7 @@ function App() {
     };
   };
 
-  // =========================================================================
   // VIEW: 生涯グロス成績・スタッツ分析ダッシュボード (?view=stats 専用)
-  // =========================================================================
   if (viewMode === 'stats') {
     const activeMasterList = playerMaster.length > 0 ? playerMaster : [
       { id: 'm001', serial: '#001', lastName: '登録なし', firstName: '', displayName: 'プレイヤー未登録' }
@@ -2029,7 +2012,6 @@ function App() {
           </div>
         </header>
 
-        {/* 期間フィルターバー */}
         <div className="bg-white border-b border-slate-200 p-2.5 space-y-2 shadow-xs">
           <div className="flex items-center justify-between text-[11px] font-bold text-slate-500">
             <span>集計期間:</span>
@@ -2098,7 +2080,6 @@ function App() {
           )}
         </div>
 
-        {/* サブタブ */}
         <div className="bg-slate-200 p-1 mx-3 mt-3 rounded-xl grid grid-cols-3 gap-1 shadow-2xs text-xs font-bold">
           <button
             onClick={() => setStatsSubTab('individual')}
@@ -2404,9 +2385,7 @@ function App() {
     );
   }
 
-  // =========================================================================
   // VIEW 1: 幹事専用ダッシュボード
-  // =========================================================================
   if (viewMode === 'admin') {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-white border-x border-slate-200 shadow-sm flex flex-col pb-16">
@@ -2863,7 +2842,7 @@ function App() {
           </div>
         </main>
 
-        {/* 🗑️ 履歴削除モーダル */}
+        {/* 履歴削除モーダル */}
         {deleteTargetItem && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200">
@@ -2924,7 +2903,7 @@ function App() {
           </div>
         )}
 
-        {/* 🔗 コンペ統合モーダル */}
+        {/* コンペ統合モーダル */}
         {showMergeModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3">
             <div className="bg-white rounded-2xl max-w-sm w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -3161,7 +3140,7 @@ function App() {
           </div>
         )}
 
-        {/* ＋ 新規コンペ・ラウンド作成モーダル (1名〜20名対応) */}
+        {/* 新規コンペ作成モーダル */}
         {showNewCompModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto">
@@ -3439,9 +3418,7 @@ function App() {
     );
   }
 
-  // =========================================================================
   // VIEW 2: 一般プレイヤー画面 (スコア入力・リーダーボード)
-  // =========================================================================
   const outHoles = holeConfig.slice(0, 9);
   const inHoles = holeConfig.slice(9, 18);
   const topRowHoles = startCourse === 'IN' ? inHoles : outHoles;
@@ -4086,7 +4063,7 @@ function App() {
             </div>
           )}
 
-          {/* 👤 個人明細 */}
+          {/* 個人明細 */}
           {rankingSubTab === 'individual' && (() => {
             const targetPlayer = activePlayers.find(p => p.id === selectedIndividualPlayerId) || activePlayers[0];
             const cumStats = calculateAccumulatedStats(18, targetPlayer);
