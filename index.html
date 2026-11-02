@@ -93,7 +93,7 @@ const createEmptySlot = (index) => ({
   hdcpVal: 0,
   hdcpScope: 'NONE',
   isGhost: false,
-  isOpenPlayer: false // 🔰 オープン参加（勝負除外・スコア記録のみ）フラグ
+  isOpenPlayer: false
 });
 
 const DEFAULT_PLAYERS = Array.from({ length: 20 }, (_, i) => createEmptySlot(i));
@@ -510,6 +510,7 @@ function App() {
               putts: s.putts !== undefined ? s.putts : 2,
               par: holeConfig[h-1].par,
               ob: s.ob || false,
+              secondOb: s.secondOb || false,
               water: s.water || false,
               bunker: s.bunker || false,
               sunaIchi: s.sunaIchi || false,
@@ -586,7 +587,6 @@ function App() {
     return () => clearTimeout(timer);
   }, [compName, compDate, startCourse, playerCount, players, par3Holes, par5Holes, isCompStarted, titleWinners, scores, h1RandomOrder]);
 
-  // 全体アクティブプレイヤー（オープン参加者も含む入力用リスト）
   const activePlayers = useMemo(() => {
     return players.slice(0, playerCount).map((p, idx) => {
       let displayName = p.name.trim();
@@ -605,7 +605,6 @@ function App() {
     });
   }, [players, playerCount, playerMaster]);
 
-  // ベガス勝負対象プレイヤー（オープン参加者を除外した本戦メンバー ＋ 必要時ゴースト補完）
   const vegasActivePlayers = useMemo(() => {
     const compHumans = activePlayers.filter(p => !p.isOpenPlayer);
     const list = [...compHumans];
@@ -658,6 +657,7 @@ function App() {
         saoIchi: false,
         sunaIchi: false,
         ob: false,
+        secondOb: false,
         water: false,
         bunker: false,
         isCompleted: ghostCompleted
@@ -685,6 +685,7 @@ function App() {
       saoIchi: holeScore?.saoIchi || false,
       sunaIchi: holeScore?.sunaIchi || false,
       ob: holeScore?.ob || false,
+      secondOb: holeScore?.secondOb || false,
       water: holeScore?.water || false,
       bunker: holeScore?.bunker || false,
       isCompleted: holeScore?.isCompleted || false
@@ -770,17 +771,22 @@ function App() {
     if (d.ob) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: 'OB (遭遇)', p: -1, type: 'pen' });
+      breakdown.push({ label: 'ティーショットOB', p: -1, type: 'pen' });
+    }
+    if (d.secondOb) {
+      penP -= 1;
+      penCount++;
+      breakdown.push({ label: 'セカンドOB', p: -1, type: 'pen' });
     }
     if (d.water) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: '池 (遭遇)', p: -1, type: 'pen' });
+      breakdown.push({ label: '池、ワンペナ', p: -1, type: 'pen' });
     }
     if (d.bunker) {
       penP -= 1;
       penCount++;
-      breakdown.push({ label: 'バンカー (遭遇)', p: -1, type: 'pen' });
+      breakdown.push({ label: 'バンカー', p: -1, type: 'pen' });
     }
 
     let autoBonusP = 0;
@@ -801,7 +807,7 @@ function App() {
         }
       }
     }
-    if (d.ob && d.gross === par + 2) {
+    if ((d.ob || d.secondOb) && d.gross === par + 2) {
       autoBonusP += 1;
       isObPar = true;
       breakdown.push({ label: 'OBパー賞 (ダボ耐え)', p: 1, type: 'auto' });
@@ -859,11 +865,11 @@ function App() {
       if (d.sunaIchi) sunaIchiCount++;
       if (pts.isBounceBack) bounceBackCount++;
       if (pts.isObPar) obParCount++;
-      if (d.ob) obCount++;
+      if (d.ob || d.secondOb) obCount++;
       if (d.water) waterCount++;
       if (d.bunker) { bunkerCount++; bunkerHolesCount++; }
       if (d.threePat) threePatCount++;
-      if (d.ob || d.water || d.bunker || d.threePat) penaltyHolesCount++;
+      if (d.ob || d.secondOb || d.water || d.bunker || d.threePat) penaltyHolesCount++;
 
       const diff = d.gross - par;
       if (diff <= -2) eagleCount++;
@@ -1743,7 +1749,6 @@ function App() {
     });
   };
 
-  // 🔰 オープン参加（勝負除外）トグル
   const handleToggleOpenPlayer = (slotIndex) => {
     setPlayers(prev => {
       const next = [...prev];
@@ -1849,7 +1854,7 @@ function App() {
         if (putts === 1) onePattCount++;
         if (putts >= 3) threePattCount++;
 
-        if (hData.ob) obHoles++;
+        if (hData.ob || hData.secondOb) obHoles++;
         if (hData.water) waterHoles++;
         if (hData.bunker) bunkerHoles++;
         if (hData.sunaIchi) sunaIchiCount++;
@@ -2325,7 +2330,7 @@ function App() {
   }
 
   // =========================================================================
-  // VIEW 1: 幹事専用ダッシュボード (未選択ホーム画面 & コンペ作業画面)
+  // VIEW 1: 幹事専用ダッシュボード
   // =========================================================================
   if (viewMode === 'admin') {
     return (
@@ -2370,8 +2375,6 @@ function App() {
         </header>
 
         <main className="flex-1 p-4 space-y-4">
-          
-          {/* コンペ未選択ホーム状態 */}
           {!compId ? (
             <div className="space-y-4 py-2">
               <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center space-y-3 shadow-xs">
@@ -2430,7 +2433,6 @@ function App() {
             </div>
           ) : (
             <>
-              {/* コンペ選択中: 作業ダッシュボード */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                   <div className="flex items-center gap-1.5">
@@ -2512,7 +2514,7 @@ function App() {
                 </div>
               </div>
 
-              {/* コース設定 (スプレッドシート連携 ＆ 手動調整) */}
+              {/* コース設定 */}
               <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <div>
@@ -2604,7 +2606,7 @@ function App() {
                 </div>
               </div>
 
-              {/* 参加者枠（🔰 オープン参加トグル対応） */}
+              {/* 参加者枠 */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between px-1">
                   <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wide">
@@ -2632,7 +2634,6 @@ function App() {
                         })}
                       </select>
 
-                      {/* 🔰 オープン参加切り替えボタン */}
                       <button
                         type="button"
                         onClick={() => handleToggleOpenPlayer(idx)}
@@ -2783,7 +2784,6 @@ function App() {
               </div>
             )}
           </div>
-
         </main>
 
         {/* 🗑️ 履歴削除モーダル */}
@@ -3084,7 +3084,7 @@ function App() {
           </div>
         )}
 
-        {/* ＋ 新規コンペ作成モーダル (スプレッドシート連動 ＆ IN自動反転) */}
+        {/* ＋ 新規コンペ作成モーダル */}
         {showNewCompModal && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl max-w-sm w-full p-4 space-y-3.5 shadow-xl border border-slate-200 max-h-[92vh] overflow-y-auto">
@@ -3150,7 +3150,6 @@ function App() {
                 </div>
               </div>
 
-              {/* スプレッドシート連携 コースプリセット選択 */}
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -3694,7 +3693,8 @@ function App() {
                               </button>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-1.5">
+                            {/* ハザード・ペナルティトグル (更新) */}
+                            <div className="grid grid-cols-2 gap-1.5">
                               <button
                                 onClick={() => updateHoleScore(player.id, 'ob', !data.ob)}
                                 className={`py-1 text-[11px] font-bold rounded-lg border transition ${
@@ -3703,7 +3703,17 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                OB -1 (遭遇)
+                                ティーショットOB -1
+                              </button>
+                              <button
+                                onClick={() => updateHoleScore(player.id, 'secondOb', !data.secondOb)}
+                                className={`py-1 text-[11px] font-bold rounded-lg border transition ${
+                                  data.secondOb
+                                    ? 'bg-red-600 border-red-700 text-white shadow-xs'
+                                    : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
+                                }`}
+                              >
+                                セカンドOB -1
                               </button>
                               <button
                                 onClick={() => updateHoleScore(player.id, 'water', !data.water)}
@@ -3713,7 +3723,7 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                池 -1 (遭遇)
+                                池、ワンペナ -1
                               </button>
                               <button
                                 onClick={() => updateHoleScore(player.id, 'bunker', !data.bunker)}
@@ -3723,7 +3733,7 @@ function App() {
                                     : 'bg-red-50/60 border-red-200 text-red-700 hover:bg-red-100/60'
                                 }`}
                               >
-                                バンカー -1 (遭遇)
+                                バンカー -1
                               </button>
                             </div>
 
@@ -4217,7 +4227,10 @@ function App() {
                       <li>・3パット以上: <b className="text-red-600">3パット自動判定 (-1P)</b></li>
                       <li>・サオイチ: <b>+1P</b> (独立トグル)</li>
                       <li>・砂イチ: <b>+1P</b> (砂イチONでバンカー自動ON)</li>
-                      <li>・OB / 池 / バンカー: <b className="text-red-600">各-1P</b> (遭遇ホール率判定)</li>
+                      <li>・ティーショットOB: <b className="text-red-600">-1P</b></li>
+                      <li>・セカンドOB: <b className="text-red-600">-1P</b></li>
+                      <li>・池、ワンペナ: <b className="text-red-600">-1P</b></li>
+                      <li>・バンカー: <b className="text-red-600">-1P</b></li>
                     </ul>
                   </div>
                   <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-300">
@@ -4232,7 +4245,7 @@ function App() {
                       <div className="pt-1 border-t border-emerald-200">
                         <b className="text-emerald-900">② OBパー賞 (+1P)</b>
                         <p className="text-slate-600 mt-0.5">
-                          ティーショット等でOBを打ちながらも、グロスPar+2（ダボ耐え）で上がった執念のナイスリカバリーに対して自動付与。
+                          ティーショットOBまたはセカンドOBを打ちながらも、グロスPar+2（ダボ耐え）で上がった執念のナイスリカバリーに対して自動付与。
                         </p>
                       </div>
                     </div>
