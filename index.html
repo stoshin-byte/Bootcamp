@@ -37,7 +37,6 @@
 <div id="root"></div>
 
 <script>
-  // Firebase初期化を確実に実行
   const firebaseConfig = {
     apiKey: "AIzaSyAHY5FtpLE8FCI0fr9oJpOAILoQRIs6Tv4",
     authDomain: "bootcamp-a4d13.firebaseapp.com",
@@ -1089,21 +1088,27 @@ function App() {
     return { evaluatedPairs, teamPoints, playerPoints, isAllPairsCompleted };
   };
 
+  // タイトルポイント集計（進行順を厳密に考慮し、基本5P / キャリー上限10P / 累計上限10P に統一）
   const titlePointsSummary = useMemo(() => {
     const playerCumulativeTitle = {};
     const holeAwarded = {};
     activePlayers.forEach(p => { playerCumulativeTitle[p.id] = 0; });
 
-    let nearpinCarry = 10;
-    let draconCarry = 10;
+    let nearpinCarry = 5;
+    let draconCarry = 5;
 
-    holeConfig.forEach(hConfig => {
-      const h = hConfig.hole;
-      if (!hConfig.titleType) return;
+    // 進行順にホールを並び替え（OUT発: 1〜18, IN発: 10〜18 ➔ 1〜9）
+    const playOrderHoles = startCourse === 'IN'
+      ? [...Array.from({ length: 9 }, (_, i) => i + 10), ...Array.from({ length: 9 }, (_, i) => i + 1)]
+      : Array.from({ length: 18 }, (_, i) => i + 1);
+
+    playOrderHoles.forEach(h => {
+      const hConfig = holeConfig.find(item => item.hole === h);
+      if (!hConfig || !hConfig.titleType) return;
 
       const isNearpin = hConfig.titleType === 'NEARPIN';
       let currentPot = isNearpin ? nearpinCarry : draconCarry;
-      currentPot = Math.min(20, currentPot);
+      currentPot = Math.min(10, currentPot);
 
       const rawWinner = titleWinners[h];
       const winnersList = Array.isArray(rawWinner) ? rawWinner : (rawWinner && rawWinner !== 'NONE' ? [rawWinner] : []);
@@ -1111,25 +1116,25 @@ function App() {
       holeAwarded[h] = { pot: currentPot, winnersList, awardedMap: {} };
 
       if (winnersList.length === 0) {
-        if (isNearpin) nearpinCarry = Math.min(20, currentPot + 10);
-        else draconCarry = Math.min(20, currentPot + 10);
+        if (isNearpin) nearpinCarry = Math.min(10, currentPot + 5);
+        else draconCarry = Math.min(10, currentPot + 5);
       } else {
         winnersList.forEach(wId => {
           const currentTotal = playerCumulativeTitle[wId] || 0;
-          const availableCap = Math.max(0, 20 - currentTotal);
+          const availableCap = Math.max(0, 10 - currentTotal);
           const actualAward = Math.min(currentPot, availableCap);
 
           holeAwarded[h].awardedMap[wId] = actualAward;
           playerCumulativeTitle[wId] = currentTotal + actualAward;
         });
 
-        if (isNearpin) nearpinCarry = 10;
-        else draconCarry = 10;
+        if (isNearpin) nearpinCarry = 5;
+        else draconCarry = 5;
       }
     });
 
     return { playerCumulativeTitle, holeAwarded };
-  }, [titleWinners, activePlayers, holeConfig]);
+  }, [titleWinners, activePlayers, holeConfig, startCourse]);
 
   const totalVegasPMap = useMemo(() => {
     const totalVegasP = {};
@@ -1755,7 +1760,6 @@ function App() {
     showToast('選手を名簿から削除しました');
   };
 
-  // 名簿選択時に、選手名をコンペデータに直接固定
   const handleAssignPlayer = (slotIndex, masterId) => {
     if (!masterId) {
       setPlayers(prev => {
@@ -2531,7 +2535,7 @@ function App() {
                       type="date"
                       value={compDate}
                       onChange={(e) => setCompDate(e.target.value)}
-                      className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-800 w-full"
+                      className="bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs font-bold text-slate-800 w-full"
                     />
                   </div>
                 </div>
@@ -2635,7 +2639,7 @@ function App() {
                 </div>
               </div>
 
-              {/* 参加人数（1名〜20名対応） */}
+              {/* 参加人数 */}
               <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
@@ -3563,7 +3567,7 @@ function App() {
                 <div className="text-right">
                   <span className="text-[10px] text-amber-700 block font-semibold">キャリー配当</span>
                   <span className="text-sm font-black text-amber-600">
-                    +{titlePointsSummary.holeAwarded[currentHole]?.pot || 10}P
+                    +{titlePointsSummary.holeAwarded[currentHole]?.pot || 5}P
                   </span>
                 </div>
               )}
@@ -3576,7 +3580,7 @@ function App() {
                     <span>🏆</span>
                     <span>{currentHoleConfig.titleType === 'NEARPIN' ? 'ニアピン' : 'ドラコン'}獲得者選択</span>
                   </span>
-                  <span className="text-[10px] text-amber-700">※大会累計20P上限</span>
+                  <span className="text-[10px] text-amber-700">※大会累計10P上限</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <select
@@ -3588,7 +3592,7 @@ function App() {
                     <option value="NONE">❌ 該当なし（次へ持ち越し）</option>
                     {activePlayers.filter(p => !p.isGhost && !p.isOpenPlayer).map(p => {
                       const currentPts = titlePointsSummary.playerCumulativeTitle[p.id] || 0;
-                      const isMax = currentPts >= 20;
+                      const isMax = currentPts >= 10;
                       return (
                         <option key={p.id} value={p.id}>
                           {p.name} (累計:{currentPts}P{isMax ? ' - 上限到達' : ''})
@@ -3598,7 +3602,7 @@ function App() {
                   </select>
                   <div className="text-[11px] bg-white rounded-lg p-1.5 border border-amber-200 flex items-center justify-center text-center font-bold">
                     {titleWinners[currentHole] === 'NONE' ? (
-                      <span className="text-amber-700">次回へ +10P 持ち越し</span>
+                      <span className="text-amber-700">次回へ +5P 持ち越し</span>
                     ) : titleWinners[currentHole] ? (
                       (() => {
                         const wInfo = titlePointsSummary.holeAwarded[currentHole];
@@ -3607,7 +3611,7 @@ function App() {
                         const pointsAwarded = winnerIds.map(id => wInfo.awardedMap[id] || 0);
                         const allZero = pointsAwarded.every(p => p === 0);
                         if (allZero) {
-                          return <span className="text-red-600">🛑 上限20P到達のため+0P</span>;
+                          return <span className="text-red-600">🛑 上限10P到達のため+0P</span>;
                         }
                         return <span className="text-emerald-700">🎉 {winnerIds.length}名 獲得確定！</span>;
                       })()
@@ -3860,7 +3864,6 @@ function App() {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {leaderboardData.map((row, idx) => {
                     if (row.player.isGhost) return null;
-                    const isOp = row.player.isOpenPlayer || playerCount === 1;
                     return (
                       <tr key={row.player.id} className={`transition ${row.player.isOpenPlayer ? 'bg-amber-50/40 text-slate-500' : 'hover:bg-slate-50'}`}>
                         <td className="p-2 text-center font-bold text-slate-400">
@@ -4365,14 +4368,14 @@ function App() {
                     <p className="text-[11px]">
                       ・ニアピン: 幹事指定のPar3 (最大4ホール)<br/>
                       ・ドラコン: 幹事指定のPar5 (最大4ホール)<br/>
-                      ・基本配当: <b>10P</b>（該当なし時は次回へ持ち越し / 上限20P）。
+                      ・基本配当: <b>5P</b>（該当なし時は次回へ持ち越し / 最大10P）。
                     </p>
                   </div>
                   <div className="bg-red-50/70 p-3 rounded-xl border border-red-200">
-                    <h3 className="font-bold text-red-900 text-xs mb-1">2. 累計20P上限 ＆ 完全ブロッカー</h3>
+                    <h3 className="font-bold text-red-900 text-xs mb-1">2. 累計10P上限 ＆ 完全ブロッカー</h3>
                     <p className="text-[11px]">
-                      ・個人累計で<b>最大20Pまで</b>獲得可能。<br/>
-                      ・すでに累計20Pに達している人が獲得した場合、付与は<b>+0P</b>となり、他人の獲得を阻止してその回のポイントを消滅させます。
+                      ・個人累計で<b>最大10Pまで</b>獲得可能（ニアピン・ドラコン合算）。<br/>
+                      ・すでに累計10Pに達している人が獲得した場合、付与は<b>+0P</b>となり、他人の獲得を阻止してその回のポイントを消滅させます。
                     </p>
                   </div>
                 </div>
@@ -4387,7 +4390,7 @@ function App() {
                       ・チップイン/1パット/3パットはパット数から完全自動判定。
                     </p>
                   </div>
-                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-300">
                     <h3 className="font-bold text-amber-900 text-xs mb-1">2. 確定と修正</h3>
                     <p className="text-[11px]">
                       ・スコア入力後は「✓ スコアを確定する」を押すとカードがグレーアウトし誤操作を防止。<br/>
